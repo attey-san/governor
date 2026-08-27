@@ -19,8 +19,10 @@ android {
 
     buildTypes {
         release {
+            // Left unsigned on purpose: shipping a debug-signed release would let
+            // anyone with the public debug key push an update over it. Sign with
+            // your own key, or just use the debug build.
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {

@@ -1,8 +1,10 @@
 local.properties
 .gradle/
+.kotlin/
 build/
 app/build/
 *.iml
 .idea/
-.commandcode/
-.ox/
+captures/
+.externalNativeBuild/
+.cxx/
