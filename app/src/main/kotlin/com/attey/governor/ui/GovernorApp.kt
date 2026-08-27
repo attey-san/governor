@@ -36,6 +36,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -43,6 +44,7 @@ import com.attey.governor.core.Capability
 import com.attey.governor.core.GovernorViewModel
 import com.attey.governor.core.PendingRevert
 import com.attey.governor.core.UiState
+import com.attey.governor.core.UsageAccess
 import com.attey.governor.ui.screens.BatteryScreen
 import com.attey.governor.ui.screens.CapabilityScreen
 import com.attey.governor.ui.screens.CpuScreen
@@ -51,8 +53,11 @@ import com.attey.governor.ui.screens.IoScreen
 import com.attey.governor.ui.screens.MeasureScreen
 import com.attey.governor.ui.screens.MemoryScreen
 import com.attey.governor.ui.screens.ProfilesScreen
+import com.attey.governor.ui.screens.ThermalScreen
 
-private val TABS = listOf("CPU", "GPU", "Battery", "I/O", "Memory", "Profiles", "Measure", "Capability")
+private val TABS = listOf(
+    "CPU", "GPU", "Battery", "Thermal", "I/O", "Memory", "Profiles", "Measure", "Capability",
+)
 
 @Composable
 fun GovernorApp(vm: GovernorViewModel = viewModel()) {
@@ -102,6 +107,13 @@ private fun ReadyScaffold(state: UiState.Ready, vm: GovernorViewModel) {
     val measurement by vm.measurement.collectAsState()
     val lastResult by vm.lastResult.collectAsState()
     val moduleExport by vm.moduleExport.collectAsState()
+    val apps by vm.installedApps.collectAsState()
+    val hasUsageAccess by vm.hasUsageAccess.collectAsState()
+    val context = LocalContext.current
+
+    // The usage-access appop is granted in Settings, so the only way to notice it
+    // happened is to look again when this tab comes back into view.
+    LaunchedEffect(selected) { vm.recheckUsageAccess() }
 
     val rejection = state.lastRejection
     LaunchedEffect(rejection) {
@@ -180,20 +192,26 @@ private fun ReadyScaffold(state: UiState.Ready, vm: GovernorViewModel) {
                     onSetGovernor = vm::setGpuGovernor,
                 )
                 2 -> BatteryScreen(battery = state.device.battery, live = state.live)
-                3 -> IoScreen(
+                3 -> ThermalScreen(zones = state.device.thermalZones, live = state.live)
+                4 -> IoScreen(
                     devices = state.device.blockDevices,
                     onSetScheduler = vm::setScheduler,
                     onSetReadAhead = vm::setReadAhead,
                 )
-                4 -> MemoryScreen(
+                5 -> MemoryScreen(
                     device = state.device,
                     onSetVm = vm::setVmTunable,
                     onSetTunable = vm::setTunable,
                 )
-                5 -> ProfilesScreen(
+                6 -> ProfilesScreen(
                     profiles = profiles,
                     triggers = triggers,
+                    apps = apps,
+                    hasUsageAccess = hasUsageAccess,
                     exportPath = moduleExport,
+                    onGrantUsageAccess = {
+                        runCatching { context.startActivity(UsageAccess.settingsIntent()) }
+                    },
                     onSave = vm::saveCurrentAsProfile,
                     onApply = vm::applyProfile,
                     onDelete = vm::deleteProfile,
@@ -202,7 +220,7 @@ private fun ReadyScaffold(state: UiState.Ready, vm: GovernorViewModel) {
                     onDeleteTrigger = vm::deleteTrigger,
                     onExportModule = vm::exportMagiskModule,
                 )
-                6 -> MeasureScreen(
+                7 -> MeasureScreen(
                     profiles = profiles,
                     run = measurement,
                     result = lastResult,

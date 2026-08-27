@@ -36,6 +36,12 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
     private val _moduleExport = MutableStateFlow<String?>(null)
     val moduleExport: StateFlow<String?> = _moduleExport.asStateFlow()
 
+    private val _installedApps = MutableStateFlow<List<InstalledApp>>(emptyList())
+    val installedApps: StateFlow<List<InstalledApp>> = _installedApps.asStateFlow()
+
+    private val _hasUsageAccess = MutableStateFlow(false)
+    val hasUsageAccess: StateFlow<Boolean> = _hasUsageAccess.asStateFlow()
+
     private val store = ProfileStore(app)
     private var baseline: MeasureRun? = null
     private var measureJob: Job? = null
@@ -48,7 +54,22 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
     init {
         _profiles.value = store.loadProfiles()
         _triggers.value = store.loadTriggers()
+        recheckUsageAccess()
         refresh()
+    }
+
+    /**
+     * Saves what the device looked like the first time this app ran.
+     *
+     * Not "kernel defaults" -- by the time anyone installs this, a vendor daemon
+     * has usually already moved things, and that is exactly the state worth being
+     * able to get back to. Without it the only way back from a bad afternoon of
+     * tuning is a reboot.
+     */
+    private fun captureAsFoundProfile(m: DeviceModel) {
+        if (_profiles.value.any { it.name == AS_FOUND }) return
+        _profiles.value = _profiles.value + ProfileEngine.snapshot(m, AS_FOUND)
+        store.saveProfiles(_profiles.value)
     }
 
     // ----------------------------------------------------------- Profiles
@@ -83,10 +104,24 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
 
     // ----------------------------------------------------------- Triggers
 
-    fun addTrigger(type: TriggerType, threshold: Int, profileName: String) {
+    fun addTrigger(
+        type: TriggerType,
+        threshold: Int,
+        profileName: String,
+        packageName: String = "",
+        appLabel: String = "",
+    ) {
         if (_profiles.value.none { it.name == profileName }) return
+        if (type.needsApp && packageName.isEmpty()) return
         _triggers.value = _triggers.value +
-            Trigger(System.currentTimeMillis(), type, threshold, profileName)
+            Trigger(
+                id = System.currentTimeMillis(),
+                type = type,
+                threshold = threshold,
+                profileName = profileName,
+                packageName = packageName,
+                appLabel = appLabel,
+            )
         store.saveTriggers(_triggers.value)
         TriggerService.sync(getApplication())
     }
@@ -101,6 +136,22 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
         _triggers.value = _triggers.value.filterNot { it.id == id }
         store.saveTriggers(_triggers.value)
         TriggerService.sync(getApplication())
+    }
+
+    /**
+     * Re-reads the usage-access appop and the launcher list.
+     *
+     * The appop is granted in Settings, not in a dialog, so the only way to know
+     * it happened is to look again when the user comes back.
+     */
+    fun recheckUsageAccess() {
+        val app = getApplication<Application>()
+        _hasUsageAccess.value = UsageAccess.hasAccess(app)
+        if (_hasUsageAccess.value && _installedApps.value.isEmpty()) {
+            viewModelScope.launch(Dispatchers.IO) {
+                _installedApps.value = UsageAccess.installedApps(app)
+            }
+        }
     }
 
     // -------------------------------------------------------- Measurement
@@ -168,6 +219,7 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
             model = m
             val live = withContext(Dispatchers.IO) { DeviceProbe.sampleLive(sh, m) }
             _state.value = UiState.Ready(m, live)
+            captureAsFoundProfile(m)
             startLive()
             viewModelScope.launch(Dispatchers.IO) {
                 _capabilities.value = Capabilities.report(sh, m)
@@ -182,7 +234,8 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
             while (isActive) {
                 val sh = shell ?: break
                 val m = model ?: break
-                val previous = (_state.value as? UiState.Ready)?.live?.hottestZone
+                val previousLive = (_state.value as? UiState.Ready)?.live
+                val previous = previousLive?.hottestZone
                 val live = DeviceProbe.sampleLive(
                     shell = sh,
                     model = m,
@@ -192,7 +245,11 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
                     previousHottest = previous,
                 )
                 val current = _state.value
-                if (current is UiState.Ready) _state.value = current.copy(live = live)
+                // Carry the last full thermal read through the ticks that skip it,
+                // otherwise the screen blanks four times out of five.
+                val merged = if (live.zoneTemps.isEmpty() && previousLive != null)
+                    live.copy(zoneTemps = previousLive.zoneTemps) else live
+                if (current is UiState.Ready) _state.value = current.copy(live = merged)
                 tick++
                 delay(2_000)
             }
@@ -393,5 +450,6 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
 
     private companion object {
         const val REVERT_SECONDS = 30
+        const val AS_FOUND = "as found"
     }
 }

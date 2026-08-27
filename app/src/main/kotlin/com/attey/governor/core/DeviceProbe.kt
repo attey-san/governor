@@ -21,8 +21,9 @@ object DeviceProbe {
     suspend fun probe(shell: RootShell): DeviceModel = withContext(Dispatchers.IO) {
         val kernel = shell.exec("uname -r").trim()
         val rootProvider = shell.exec("su -v 2>/dev/null").trim().ifEmpty { "unknown" }
+        val policies = probePolicies(shell)
         DeviceModel(
-            policies = probePolicies(shell),
+            policies = policies,
             gpus = probeGpus(shell),
             battery = probeBattery(shell),
             blockDevices = probeBlock(shell),
@@ -30,6 +31,7 @@ object DeviceProbe {
             vmTunables = probeVm(shell),
             boost = probeBoost(shell),
             zram = probeZram(shell),
+            coresOnline = probeCoreOnline(shell, policies),
             rootProvider = rootProvider,
             kernel = kernel,
         )
@@ -99,8 +101,8 @@ object DeviceProbe {
     }
 
     /** cpu -> online, for the per-core switches. cpu0 is always reported online. */
-    fun probeCoreOnline(shell: RootShell, model: DeviceModel): Map<Int, Boolean> {
-        val cpus = model.policies.flatMap { it.cpus }.sorted()
+    private fun probeCoreOnline(shell: RootShell, policies: List<CpuPolicy>): Map<Int, Boolean> {
+        val cpus = policies.flatMap { it.cpus }.sorted()
         val read = shell.readAll(cpus.map { "$CPU/cpu$it/online" })
         return cpus.associateWith { c ->
             // cpu0 frequently has no online node at all because it cannot be taken
@@ -292,7 +294,10 @@ object DeviceProbe {
             ThermalZone(
                 id = id,
                 type = read["$d/type"]?.trim().orEmpty(),
-                tempMilliC = read["$d/temp"]?.trim()?.toIntOrNull() ?: return@mapNotNull null,
+                // A zone whose temp cannot be read is unpopulated, not missing.
+                // Dropping it understates how many zones the kernel actually has,
+                // which makes "74 of 87 reporting" quietly wrong.
+                tempMilliC = read["$d/temp"]?.trim()?.toIntOrNull() ?: Int.MIN_VALUE,
             )
         }
     }
@@ -374,11 +379,14 @@ object DeviceProbe {
         val rawCurrent = read["$bat/current_now"]?.trim()?.toLongOrNull()
         val mW = milliwatts(rawCurrent, uV)
 
-        val hottest = if (!includeThermal) previousHottest else model.thermalZones.mapNotNull { z ->
-            val t = read["/sys/class/thermal/thermal_zone${z.id}/temp"]?.trim()?.toIntOrNull()
-                ?: return@mapNotNull null
-            if (t <= -30_000) null else z.type to t / 1000f
-        }.maxByOrNull { it.second }
+        val temps: Map<Int, Float> = if (!includeThermal) emptyMap() else
+            model.thermalZones.mapNotNull { z ->
+                val t = read["/sys/class/thermal/thermal_zone${z.id}/temp"]?.trim()?.toIntOrNull()
+                    ?: return@mapNotNull null
+                if (t <= -30_000) null else z.id to t / 1000f
+            }.toMap()
+        val hottest = if (!includeThermal) previousHottest else temps.maxByOrNull { it.value }
+            ?.let { e -> model.thermalZones.first { it.id == e.key }.type to e.value }
 
         return LiveStats(
             // Absent means absent. Defaulting an unreadable node to 0 renders as
@@ -401,6 +409,7 @@ object DeviceProbe {
             // -- but every one of them fills in `status` correctly.
             charging = read["$bat/status"]?.trim()?.startsWith("Charging", true) == true,
             hottestZone = hottest,
+            zoneTemps = temps,
             uptimeSeconds = read["/proc/uptime"]?.trim()?.substringBefore('.')?.toLongOrNull() ?: 0,
         )
     }

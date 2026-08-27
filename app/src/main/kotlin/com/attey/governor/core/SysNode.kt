@@ -92,6 +92,13 @@ object Writer {
      */
     fun write(shell: RootShell, path: String, value: String): WriteResult {
         if (isDenied(path)) return WriteResult.Refused("thermal nodes are not writable by this app")
+        // Values reach the shell inside single quotes. A value containing one --
+        // typed into a tunable field by hand -- would close the quote and leave
+        // the persistent shell waiting for input that never comes, hanging every
+        // later command. Newlines split the command outright.
+        if (value.any { it == '\'' || it == '\n' || it == '\r' }) {
+            return WriteResult.Refused("value contains a quote or newline")
+        }
         // No trailing whitespace: at least one kernel interface (cpu_boost's
         // input_boost_freq) rejects a value written with a trailing space and
         // silently keeps the old one.

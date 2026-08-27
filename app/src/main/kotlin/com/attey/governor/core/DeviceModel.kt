@@ -17,6 +17,8 @@ data class DeviceModel(
     val boost: Map<String, SysNode> = emptyMap(),
     /** zram0's knobs, keyed by bare name. Empty when the device has no zram. */
     val zram: Map<String, SysNode> = emptyMap(),
+    /** cpu index -> online. A core with no `online` node cannot be taken down. */
+    val coresOnline: Map<Int, Boolean> = emptyMap(),
     val rootProvider: String = "unknown",
     val kernel: String = "",
 ) {

@@ -28,20 +28,64 @@ class RootShell private constructor(
 ) {
     private val lock = Any()
 
+    /**
+     * Set when a command failed to finish in time.
+     *
+     * A timed-out command leaves unread output in the pipe, which would be handed
+     * to whatever runs next as if it were that command's answer. Rather than try
+     * to resynchronise, the shell is destroyed and [get] starts a fresh one.
+     */
+    @Volatile private var broken = false
+
+    val isUsable: Boolean get() = !broken && process.isAlive
+
     /** Runs [cmd] and returns stdout with the trailing newline stripped. */
-    fun exec(cmd: String): String = synchronized(lock) {
+    fun exec(cmd: String, timeoutMs: Long = DEFAULT_TIMEOUT_MS): String = synchronized(lock) {
+        if (broken) return ""
         val sentinel = "__GOV_${System.nanoTime()}__"
-        stdin.write(cmd)
-        stdin.write("\necho $sentinel\n")
-        stdin.flush()
+        try {
+            stdin.write(cmd)
+            stdin.write("\necho $sentinel\n")
+            stdin.flush()
+        } catch (_: Exception) {
+            broken = true
+            return ""
+        }
+        val deadline = System.currentTimeMillis() + timeoutMs
         val sb = StringBuilder()
         while (true) {
-            val line = stdout.readLine() ?: break
+            val line = readLineBefore(deadline)
+            if (line == null) {
+                // Either the shell died or it stopped answering. Both mean this
+                // instance can no longer be trusted to line up commands with
+                // their output.
+                broken = true
+                runCatching { process.destroy() }
+                return sb.toString()
+            }
             if (line == sentinel) break
             if (sb.isNotEmpty()) sb.append('\n')
             sb.append(line)
         }
         sb.toString()
+    }
+
+    /**
+     * Blocking read with a deadline. `ready()` is checked first so a shell that
+     * has stopped producing output cannot park a coroutine forever -- which is
+     * what a hung `su` used to do, leaving the app on "probing" with no way back.
+     */
+    private fun readLineBefore(deadline: Long): String? {
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                if (stdout.ready()) return stdout.readLine()
+                if (!process.isAlive) return null
+                Thread.sleep(4)
+            } catch (_: Exception) {
+                return null
+            }
+        }
+        return null
     }
 
     suspend fun execAsync(cmd: String): String = withContext(Dispatchers.IO) { exec(cmd) }
@@ -93,13 +137,16 @@ class RootShell private constructor(
     }
 
     companion object {
+        private const val DEFAULT_TIMEOUT_MS = 20_000L
+        private const val GRANT_TIMEOUT_MS = 120_000L
+
         @Volatile private var instance: RootShell? = null
 
         /** Returns a live root shell, or null if root was denied or absent. */
         fun get(): RootShell? {
-            instance?.let { if (it.process.isAlive) return it }
+            instance?.let { if (it.isUsable) return it }
             synchronized(this) {
-                instance?.let { if (it.process.isAlive) return it }
+                instance?.let { if (it.isUsable) return it }
                 return try {
                     val p = ProcessBuilder("su").redirectErrorStream(true).start()
                     val w = OutputStreamWriter(p.outputStream)
@@ -107,7 +154,9 @@ class RootShell private constructor(
                     val shell = RootShell(p, w, r)
                     // Prove we actually got uid 0 -- `su` existing is not the same
                     // as `su` being granted.
-                    if (shell.exec("id -u").trim() != "0") { shell.close(); null }
+                    // Generous: this is the call the su prompt blocks, and the
+                    // user has to find the phone and tap Grant.
+                    if (shell.exec("id -u", GRANT_TIMEOUT_MS).trim() != "0") { shell.close(); null }
                     else { instance = shell; shell }
                 } catch (_: Exception) {
                     null

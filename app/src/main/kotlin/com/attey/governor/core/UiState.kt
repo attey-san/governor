@@ -44,6 +44,8 @@ data class LiveStats(
     val charging: Boolean = false,
     /** Hottest populated thermal zone, for the header. */
     val hottestZone: Pair<String, Float>? = null,
+    /** zone id -> degrees C, populated zones only. Refreshed on the slow tick. */
+    val zoneTemps: Map<Int, Float> = emptyMap(),
     val uptimeSeconds: Long = 0,
 )
 

@@ -20,6 +20,7 @@ import com.attey.governor.core.LiveStats
 import com.attey.governor.ui.components.ChoiceRow
 import com.attey.governor.ui.components.FreqSlider
 import com.attey.governor.ui.components.NotExposed
+import com.attey.governor.ui.components.Readout
 import com.attey.governor.ui.components.SectionCard
 import com.attey.governor.ui.components.ValueRow
 
@@ -59,10 +60,11 @@ private fun GpuCard(
         if (curFreq == null) {
             NotExposed("current frequency")
         } else {
-            Text(
-                text = "%.0f MHz".format(curFreq / 1_000_000.0),
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onSurface,
+            Readout(
+                value = String.format(java.util.Locale.US, "%.0f", curFreq / 1_000_000.0),
+                unit = "MHz",
+                color = MaterialTheme.colorScheme.primary,
+                caption = gpu.governor,
             )
         }
         if (busy == null) {

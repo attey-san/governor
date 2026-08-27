@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
@@ -25,6 +27,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.attey.governor.core.CpuPolicy
 import com.attey.governor.core.DeviceModel
@@ -57,6 +60,7 @@ fun CpuScreen(
             CpuPolicyCard(
                 policy = policy,
                 clusterLabel = labels.getOrNull(index) ?: "Cluster $index",
+                online = device.coresOnline,
                 currentFreq = live.policyCurFreq[policy.id],
                 onSetFreq = onSetFreq,
                 onSetGovernor = onSetGovernor,
@@ -71,6 +75,7 @@ fun CpuScreen(
 private fun CpuPolicyCard(
     policy: CpuPolicy,
     clusterLabel: String,
+    online: Map<Int, Boolean>,
     currentFreq: Long?,
     onSetFreq: (policyId: Int, min: Long, max: Long) -> Unit,
     onSetGovernor: (policyId: Int, governor: String) -> Unit,
@@ -139,6 +144,7 @@ private fun CpuPolicyCard(
         )
         CoresSection(
             cpus = policy.cpus,
+            online = online,
             onSetCoreOnline = onSetCoreOnline,
         )
     }
@@ -210,7 +216,12 @@ private fun TunableRow(
             var text by remember(node.path, node.value) { mutableStateOf(node.value) }
             OutlinedTextField(
                 value = text,
-                onValueChange = { text = it; onSetTunable(node.path, it) },
+                onValueChange = { text = it },
+                // Committing per keystroke sends a root write and a full re-probe for
+                // every character: typing "1200000" wrote 1, 12, 120 ... to a live
+                // governor tunable. Wait for the keyboard's done action.
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { onSetTunable(node.path, text.trim()) }),
                 modifier = Modifier
                     .padding(start = 8.dp)
                     .weight(1f),
@@ -230,6 +241,7 @@ private fun TunableRow(
 @Composable
 private fun CoresSection(
     cpus: List<Int>,
+    online: Map<Int, Boolean>,
     onSetCoreOnline: (cpu: Int, online: Boolean) -> Unit,
 ) {
     if (cpus.isEmpty()) {
@@ -263,7 +275,9 @@ private fun CoresSection(
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                 )
                 Switch(
-                    checked = true,
+                    // Read the node, do not assume. A core offlined by the vendor's
+                    // core_ctl, or by this app before a restart, is still offline.
+                    checked = online[cpu] ?: true,
                     onCheckedChange = { on ->
                         if (canOffline) onSetCoreOnline(cpu, on)
                     },

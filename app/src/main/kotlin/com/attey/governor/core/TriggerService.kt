@@ -14,7 +14,10 @@ import android.os.IBinder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -30,9 +33,10 @@ class TriggerService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val store by lazy { ProfileStore(this) }
 
-    private var model: DeviceModel? = null
-    private var triggers: List<Trigger> = emptyList()
-    private var profiles: List<Profile> = emptyList()
+    // Broadcasts arrive on the main thread while reload() runs in a coroutine.
+    @Volatile private var model: DeviceModel? = null
+    @Volatile private var triggers: List<Trigger> = emptyList()
+    @Volatile private var profiles: List<Profile> = emptyList()
 
     /**
      * Threshold triggers fire on the *crossing*, not on the level.
@@ -41,7 +45,20 @@ class TriggerService : Service() {
      * "below 30%" trigger would re-apply its profile a hundred times on the way
      * from 30 to 20, fighting anything the user did by hand in between.
      */
-    private val armed = mutableMapOf<Long, Boolean>()
+    private val armed = java.util.concurrent.ConcurrentHashMap<Long, Boolean>()
+
+    private var appPollJob: Job? = null
+    @Volatile private var screenOn = true
+    @Volatile private var currentApp: String? = null
+
+    /**
+     * What was in effect before an app trigger took over.
+     *
+     * An app profile that never came back off would be a trap: open a game once
+     * and the phone stays clocked up until you notice. Entering the app snapshots
+     * the live settings, leaving it puts them back.
+     */
+    @Volatile private var beforeApp: Profile? = null
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) = handle(intent)
@@ -80,9 +97,68 @@ class TriggerService : Service() {
         armed.clear()
         triggers.forEach { armed[it.id] = true }
         notify(if (triggers.isEmpty()) "no triggers set" else "${triggers.size} trigger(s) armed")
+        syncAppPoll()
+    }
+
+    /**
+     * Starts or stops the foreground-app poll.
+     *
+     * Nothing polls unless an app trigger exists and the screen is on. A battery
+     * app that quietly wakes every ten seconds forever would be exactly the kind
+     * of thing it is supposed to help you find.
+     */
+    private fun syncAppPoll() {
+        val wanted = screenOn && triggers.any { it.type == TriggerType.APP_FOREGROUND } &&
+            UsageAccess.hasAccess(this)
+        if (!wanted) {
+            appPollJob?.cancel()
+            appPollJob = null
+            return
+        }
+        if (appPollJob?.isActive == true) return
+        appPollJob = scope.launch {
+            while (isActive) {
+                checkForegroundApp()
+                delay(APP_POLL_MS)
+            }
+        }
+    }
+
+    private suspend fun checkForegroundApp() {
+        val pkg = UsageAccess.foregroundPackage(this) ?: return
+        if (pkg == currentApp) return
+        val previous = currentApp
+        currentApp = pkg
+
+        val entering = triggers.firstOrNull {
+            it.type == TriggerType.APP_FOREGROUND && it.packageName == pkg
+        }
+        val leaving = previous != null && triggers.any {
+            it.type == TriggerType.APP_FOREGROUND && it.packageName == previous
+        }
+
+        val shell = RootShell.get() ?: return
+        val device = model ?: DeviceProbe.probe(shell).also { model = it }
+
+        if (leaving && entering == null) {
+            beforeApp?.let {
+                ProfileEngine.apply(shell, device, it)
+                notify("restored settings from before ${previous}")
+            }
+            beforeApp = null
+            return
+        }
+        if (entering != null) {
+            if (beforeApp == null) beforeApp = ProfileEngine.snapshot(device, "before app")
+            fire(entering)
+        }
     }
 
     private fun handle(intent: Intent) {
+        when (intent.action) {
+            Intent.ACTION_SCREEN_ON -> { screenOn = true; syncAppPoll() }
+            Intent.ACTION_SCREEN_OFF -> { screenOn = false; syncAppPoll() }
+        }
         val matches = when (intent.action) {
             Intent.ACTION_POWER_CONNECTED -> triggers.filter { it.type == TriggerType.PLUGGED_IN }
             Intent.ACTION_POWER_DISCONNECTED -> triggers.filter { it.type == TriggerType.UNPLUGGED }
@@ -162,6 +238,7 @@ class TriggerService : Service() {
     }
 
     override fun onDestroy() {
+        appPollJob?.cancel()
         runCatching { unregisterReceiver(receiver) }
         scope.cancel()
         super.onDestroy()
@@ -173,6 +250,9 @@ class TriggerService : Service() {
         private const val CHANNEL = "governor_triggers"
         private const val NOTIFICATION_ID = 1
         private const val HYSTERESIS = 3
+
+        /** Slow on purpose. See [syncAppPoll]. */
+        const val APP_POLL_MS = 10_000L
 
         /** Starts or refreshes the watcher. Safe to call repeatedly. */
         fun sync(context: Context) {

@@ -80,6 +80,8 @@ class ProfileStore(context: Context) {
         put("threshold", threshold)
         put("profileName", profileName)
         put("enabled", enabled)
+        put("packageName", packageName)
+        put("appLabel", appLabel)
     }
 
     private fun toTrigger(o: JSONObject): Trigger? {
@@ -93,6 +95,8 @@ class ProfileStore(context: Context) {
             threshold = o.optInt("threshold"),
             profileName = o.optString("profileName"),
             enabled = o.optBoolean("enabled", true),
+            packageName = o.optString("packageName"),
+            appLabel = o.optString("appLabel"),
         )
     }
 

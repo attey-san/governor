@@ -29,13 +29,18 @@ data class Profile(
             vm.size + io.size + listOfNotNull(gpuMin, gpuMax, gpuGovernor).size
 }
 
-enum class TriggerType(val label: String, val needsThreshold: Boolean) {
-    UNPLUGGED("when unplugged", false),
-    PLUGGED_IN("when plugged in", false),
-    SCREEN_OFF("when the screen goes off", false),
-    SCREEN_ON("when the screen comes on", false),
-    BATTERY_BELOW("when battery drops below", true),
-    TEMP_ABOVE("when battery temperature rises above", true),
+enum class TriggerType(
+    val label: String,
+    val needsThreshold: Boolean = false,
+    val needsApp: Boolean = false,
+) {
+    UNPLUGGED("when unplugged"),
+    PLUGGED_IN("when plugged in"),
+    SCREEN_OFF("when the screen goes off"),
+    SCREEN_ON("when the screen comes on"),
+    BATTERY_BELOW("when battery drops below", needsThreshold = true),
+    TEMP_ABOVE("when battery temperature rises above", needsThreshold = true),
+    APP_FOREGROUND("while an app is open", needsApp = true),
 }
 
 data class Trigger(
@@ -45,12 +50,18 @@ data class Trigger(
     val threshold: Int,
     val profileName: String,
     val enabled: Boolean = true,
+    /** Package to watch, for [TriggerType.APP_FOREGROUND]. */
+    val packageName: String = "",
+    /** Human-readable app name, cached so the list reads properly offline. */
+    val appLabel: String = "",
 ) {
     val description: String
-        get() = if (type.needsThreshold) {
-            "${type.label} $threshold${if (type == TriggerType.BATTERY_BELOW) "%" else "°C"} → $profileName"
-        } else {
-            "${type.label} → $profileName"
+        get() = when {
+            type.needsThreshold ->
+                "${type.label} $threshold${if (type == TriggerType.BATTERY_BELOW) "%" else "°C"} → $profileName"
+            type.needsApp ->
+                "${type.label.replace("an app", appLabel.ifEmpty { packageName })} → $profileName"
+            else -> "${type.label} → $profileName"
         }
 }
 

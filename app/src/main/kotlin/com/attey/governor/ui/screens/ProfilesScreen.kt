@@ -26,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.attey.governor.core.InstalledApp
 import com.attey.governor.core.Profile
 import com.attey.governor.core.Trigger
 import com.attey.governor.core.TriggerType
@@ -37,11 +38,14 @@ import com.attey.governor.ui.components.SectionCard
 fun ProfilesScreen(
     profiles: List<Profile>,
     triggers: List<Trigger>,
+    apps: List<InstalledApp>,
+    hasUsageAccess: Boolean,
     exportPath: String?,
+    onGrantUsageAccess: () -> Unit,
     onSave: (String) -> Unit,
     onApply: (String) -> Unit,
     onDelete: (String) -> Unit,
-    onAddTrigger: (TriggerType, Int, String) -> Unit,
+    onAddTrigger: (TriggerType, Int, String, String, String) -> Unit,
     onSetTriggerEnabled: (Long, Boolean) -> Unit,
     onDeleteTrigger: (Long) -> Unit,
     onExportModule: (String) -> Unit,
@@ -85,7 +89,12 @@ fun ProfilesScreen(
             }
         }
 
-        item { TriggersCard(profiles, triggers, onAddTrigger, onSetTriggerEnabled, onDeleteTrigger) }
+        item {
+            TriggersCard(
+                profiles, triggers, apps, hasUsageAccess,
+                onAddTrigger, onSetTriggerEnabled, onDeleteTrigger, onGrantUsageAccess,
+            )
+        }
 
         if (exportPath != null) {
             item {
@@ -141,16 +150,22 @@ private fun SaveCard(profiles: List<Profile>, onSave: (String) -> Unit) {
 private fun TriggersCard(
     profiles: List<Profile>,
     triggers: List<Trigger>,
-    onAdd: (TriggerType, Int, String) -> Unit,
+    apps: List<InstalledApp>,
+    hasUsageAccess: Boolean,
+    onAdd: (TriggerType, Int, String, String, String) -> Unit,
     onSetEnabled: (Long, Boolean) -> Unit,
     onDelete: (Long) -> Unit,
+    onGrantUsageAccess: () -> Unit,
 ) {
     var type by remember { mutableStateOf(TriggerType.UNPLUGGED) }
     var threshold by remember { mutableStateOf("30") }
-    var target by remember { mutableStateOf("") }
+    var chosen by remember { mutableStateOf<String?>(null) }
+    var chosenApp by remember { mutableStateOf<InstalledApp?>(null) }
 
     val names = profiles.map { it.name }
-    if (target.isEmpty() && names.isNotEmpty()) target = names.first()
+    // Writing state during composition schedules another composition, which
+    // writes again. Fall back to the first profile when reading instead.
+    val target = chosen?.takeIf { it in names } ?: names.firstOrNull().orEmpty()
 
     SectionCard(title = "triggers", subtitle = "the phone applies these on its own") {
         triggers.forEach { t ->
@@ -174,6 +189,31 @@ private fun TriggersCard(
             enabled = names.isNotEmpty(),
             onSelect = { label -> TriggerType.entries.firstOrNull { it.label == label }?.let { type = it } },
         )
+        if (type.needsApp) {
+            if (!hasUsageAccess) {
+                Text(
+                    "Watching which app is open needs usage access. Android grants it in " +
+                        "Settings, not from a dialog. Nothing is polled until you add an " +
+                        "app trigger, and only while the screen is on.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedButton(onClick = onGrantUsageAccess) { Text("Open usage access settings") }
+            } else {
+                ChoiceRow(
+                    label = "app",
+                    options = apps.map { it.label },
+                    selected = chosenApp?.label ?: apps.firstOrNull()?.label.orEmpty(),
+                    enabled = apps.isNotEmpty(),
+                    onSelect = { label -> chosenApp = apps.firstOrNull { it.label == label } },
+                )
+                Text(
+                    "The settings in place when the app opens are put back when you leave it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         if (type.needsThreshold) {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -195,7 +235,7 @@ private fun TriggersCard(
             options = names,
             selected = target,
             enabled = names.isNotEmpty(),
-            onSelect = { target = it },
+            onSelect = { chosen = it },
         )
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             if (names.isEmpty()) {
@@ -208,9 +248,19 @@ private fun TriggersCard(
             } else {
                 Column(modifier = Modifier.weight(1f)) {}
             }
+            val app = chosenApp ?: apps.firstOrNull()
             Button(
-                enabled = names.isNotEmpty() && target.isNotEmpty(),
-                onClick = { onAdd(type, threshold.toIntOrNull() ?: 0, target) },
+                enabled = names.isNotEmpty() && target.isNotEmpty() &&
+                    (!type.needsApp || (hasUsageAccess && app != null)),
+                onClick = {
+                    onAdd(
+                        type,
+                        threshold.toIntOrNull() ?: 0,
+                        target,
+                        if (type.needsApp) app?.packageName.orEmpty() else "",
+                        if (type.needsApp) app?.label.orEmpty() else "",
+                    )
+                },
             ) { Text("Add trigger") }
         }
     }

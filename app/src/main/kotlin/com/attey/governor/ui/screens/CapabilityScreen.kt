@@ -29,13 +29,23 @@ fun CapabilityScreen(capabilities: List<Capability>) {
         contentPadding = PaddingValues(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        items(listOf(Unit)) { _ ->
-            SectionCard(title = "Summary") {
+        item {
+            SectionCard(title = "summary") {
                 Text(
-                    text = "this kernel exposes $present of $total known tunables",
+                    // Before the probe returns this list is empty, and "0 of 0"
+                    // reads like a finding rather than a blank page.
+                    text = if (total == 0) "probing"
+                    else "this kernel exposes $present of $total known tunables",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
+                if (total > 0) {
+                    Text(
+                        text = "rw = writable · ro = present but read-only · absent = not in this kernel",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
         items(grouped.entries.toList()) { (area, items) ->
