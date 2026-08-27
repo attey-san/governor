@@ -20,24 +20,41 @@ data class SysNode(
         fun probe(shell: RootShell, paths: List<String>): Map<String, SysNode> {
             if (paths.isEmpty()) return emptyMap()
             val script = paths.joinToString("\n") { p ->
-                "printf '%s\\t%s\\t%s\\t%s\\n' '$p' " +
-                    "\"\$([ -e '$p' ] && echo 1 || echo 0)\" " +
-                    "\"\$([ -w '$p' ] && echo 1 || echo 0)\" " +
+                "printf '%s\\t%s\\t%s\\n' '$p' " +
+                    "\"\$(stat -c %a '$p' 2>/dev/null)\" " +
                     "\"\$(cat '$p' 2>/dev/null | head -c 4096 | tr '\\n' ' ')\""
             }
             val out = shell.exec(script)
             val map = HashMap<String, SysNode>(paths.size)
             for (line in out.lineSequence()) {
                 val f = line.split('\t')
-                if (f.size < 3) continue
+                if (f.size < 2) continue
+                val mode = f[1].trim()
                 map[f[0]] = SysNode(
                     path = f[0],
-                    exists = f[1] == "1",
-                    writable = f[2] == "1",
-                    value = if (f.size > 3) f[3].trim() else "",
+                    exists = mode.isNotEmpty(),
+                    writable = ownerWritable(mode),
+                    value = if (f.size > 2) f[2].trim() else "",
                 )
             }
             return map
+        }
+
+        /**
+         * Writability from the mode bits, not from `[ -w ]`.
+         *
+         * `[ -w ]` calls access(2), which consults SELinux. On the development
+         * device every cpufreq node failed that test while writes to them
+         * demonstrably worked -- scaling_max_freq is system:system 0664 and the
+         * shell's domain is denied by policy, yet the write goes through. Trusting
+         * access(2) greys out every control in the app on a device where all of
+         * them work, which is the worst kind of wrong: quiet and plausible.
+         */
+        private fun ownerWritable(mode: String): Boolean {
+            val m = mode.trim()
+            if (m.length < 3) return false
+            val owner = m[m.length - 3].digitToIntOrNull() ?: return false
+            return owner and 2 != 0
         }
     }
 }
