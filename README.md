@@ -74,6 +74,10 @@ separated from `dm-*`, `loop*` and `zram*`, and mount points are resolved throug
 | **Measure** | A/B battery draw with residency breakdown |
 | **Capability** | What this kernel exposes, out of what is known to exist |
 
+A quick-settings tile cycles through saved profiles and applies each on tap, so a profile
+can be changed from the pull-down without unlocking anything. Add it from the quick
+settings edit screen.
+
 ### Triggers
 
 Profiles apply themselves on unplug, plug in, screen off, screen on, battery below a

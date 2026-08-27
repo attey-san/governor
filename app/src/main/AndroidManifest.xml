@@ -48,6 +48,17 @@
                 android:value="Applies kernel tuning profiles when battery, charging or screen state changes" />
         </service>
 
+        <service
+            android:name=".core.ProfileTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_launcher_foreground"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <receiver
             android:name=".core.BootReceiver"
             android:exported="true">

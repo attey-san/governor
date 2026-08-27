@@ -16,12 +16,28 @@ class ProfileStore(context: Context) {
     private val profileFile = File(context.filesDir, "profiles.json")
     private val triggerFile = File(context.filesDir, "triggers.json")
 
+    /**
+     * Which profile the quick-settings tile last applied.
+     *
+     * A plain file rather than SharedPreferences: the tile service and the app run
+     * in the same process here, but a one-line file is readable with `cat` on a
+     * phone that is misbehaving, and the rest of this app's state already is.
+     */
+    private val activeFile = File(context.filesDir, "active-profile")
+
     fun loadProfiles(): List<Profile> = read(profileFile) { toProfile(it) }
 
     fun saveProfiles(profiles: List<Profile>) =
         write(profileFile, profiles.map { it.toJson() })
 
     fun loadTriggers(): List<Trigger> = read(triggerFile) { toTrigger(it) }
+
+    fun loadActiveProfile(): String? =
+        runCatching { activeFile.readText().trim().ifEmpty { null } }.getOrNull()
+
+    fun saveActiveProfile(name: String) {
+        runCatching { activeFile.writeText(name) }
+    }
 
     fun saveTriggers(triggers: List<Trigger>) =
         write(triggerFile, triggers.map { it.toJson() })
