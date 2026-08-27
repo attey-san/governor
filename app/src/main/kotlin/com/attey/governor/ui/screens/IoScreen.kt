@@ -64,6 +64,7 @@ private fun BlockCard(
     onSetReadAhead: (Long) -> Unit,
 ) {
     val subtitle = listOfNotNull(
+        dev.sizeLabel.ifEmpty { null },
         dev.mountedAt?.let { "mounted at $it" },
         if (dev.rotational) "rotational" else "non-rotational",
         if (dev.isVirtual) "virtual" else null,

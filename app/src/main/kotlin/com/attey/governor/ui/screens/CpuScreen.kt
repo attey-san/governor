@@ -33,6 +33,8 @@ import com.attey.governor.core.SysNode
 import com.attey.governor.ui.components.ChoiceRow
 import com.attey.governor.ui.components.FreqSlider
 import com.attey.governor.ui.components.NotExposed
+import com.attey.governor.ui.components.Readout
+import com.attey.governor.ui.components.kHzValue
 import com.attey.governor.ui.components.SectionCard
 import com.attey.governor.ui.components.kHzToGHz
 
@@ -81,10 +83,11 @@ private fun CpuPolicyCard(
         if (currentFreq == null) {
             NotExposed("current frequency")
         } else {
-            Text(
-                text = currentFreq.kHzToGHz(),
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onSurface,
+            Readout(
+                value = currentFreq.kHzValue(),
+                unit = "GHz",
+                color = MaterialTheme.colorScheme.primary,
+                caption = policy.governor,
             )
         }
         var min by remember(policy.scalingMin) { mutableStateOf(policy.scalingMin) }
@@ -113,9 +116,12 @@ private fun CpuPolicyCard(
         )
         if (policy.isCappedBelowHardware) {
             Text(
-                text = "kernel ceiling ${policy.scalingMax.kHzToGHz()}, " +
-                    "silicon ${policy.hwMax.kHzToGHz()} -- " +
-                    "something else is holding this down",
+                // Careful with the claim here: the app cannot tell its own cap
+                // from the vendor thermal daemon's, and asserting "something else
+                // did this" right after the user did it would be a lie in an app
+                // whose whole argument is that it does not tell you any.
+                text = "ceiling ${policy.scalingMax.kHzToGHz()}, silicon goes to " +
+                    "${policy.hwMax.kHzToGHz()}. If you did not set this, something else did.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

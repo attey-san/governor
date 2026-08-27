@@ -1,72 +1,144 @@
 package com.attey.governor.ui.theme
 
-import android.os.Build
+import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
 
-private val DarkScheme = darkColorScheme(
-    primary = Color(0xFF7FB2FF),
-    onPrimary = Color(0xFF002E66),
-    primaryContainer = Color(0xFF13427A),
-    onPrimaryContainer = Color(0xFFD7E3FF),
-    secondary = Color(0xFFB7C4D4),
-    onSecondary = Color(0xFF212E3D),
-    secondaryContainer = Color(0xFF384454),
-    onSecondaryContainer = Color(0xFFD3E0F0),
-    tertiary = Color(0xFFE0B97A),
-    background = Color(0xFF101418),
-    onBackground = Color(0xFFE2E2E6),
-    surface = Color(0xFF161A1F),
-    onSurface = Color(0xFFE2E2E6),
-    surfaceVariant = Color(0xFF1E232A),
-    onSurfaceVariant = Color(0xFFC1C7CF),
-    outline = Color(0xFF8B9198),
-    error = Color(0xFFFFB4AB),
-    onError = Color(0xFF690005),
+/**
+ * A fixed palette, not Material You.
+ *
+ * Dynamic colour derives from the wallpaper, and on the development phone -- a
+ * black and white wallpaper -- it produced an entirely greyscale app in which
+ * nothing could be distinguished from anything else. A tool that uses colour to
+ * mean something ("this is capped", "the kernel refused this") cannot let the
+ * wallpaper decide whether colour exists.
+ *
+ * Colour here carries meaning:
+ *   primary   -- live, active, yours
+ *   tertiary  -- something is being held down by the system, not by you
+ *   error     -- the kernel refused, or the phone is hot
+ */
+private val Mint = Color(0xFF5FD3B4)
+private val MintDim = Color(0xFF1E3B36)
+private val Amber = Color(0xFFFFC46B)
+private val AmberDim = Color(0xFF3A2F1B)
+private val Coral = Color(0xFFFF6B6B)
+
+private val Dark = darkColorScheme(
+    primary = Mint,
+    onPrimary = Color(0xFF00201A),
+    primaryContainer = MintDim,
+    onPrimaryContainer = Mint,
+    secondary = Color(0xFF8FB6FF),
+    onSecondary = Color(0xFF00204B),
+    tertiary = Amber,
+    onTertiary = Color(0xFF2A1D00),
+    tertiaryContainer = AmberDim,
+    onTertiaryContainer = Amber,
+    error = Coral,
+    onError = Color(0xFF3A0A0A),
+    background = Color(0xFF0A0C0E),
+    onBackground = Color(0xFFE4E8EB),
+    surface = Color(0xFF0A0C0E),
+    onSurface = Color(0xFFE4E8EB),
+    surfaceVariant = Color(0xFF171B1F),
+    onSurfaceVariant = Color(0xFF9BA5AE),
+    outline = Color(0xFF3A424A),
+    outlineVariant = Color(0xFF262C32),
+    // Material's own defaults for these are violet, and they leak into controls
+    // that never name a colour -- the slider's inactive track was arriving purple
+    // in an otherwise teal app.
+    secondaryContainer = Color(0xFF1B2735),
+    onSecondaryContainer = Color(0xFF8FB6FF),
+    surfaceContainerLowest = Color(0xFF06080A),
+    surfaceContainerLow = Color(0xFF101418),
+    surfaceContainer = Color(0xFF141A1E),
+    surfaceContainerHigh = Color(0xFF1A2126),
+    surfaceContainerHighest = Color(0xFF222A30),
+    inverseSurface = Color(0xFFE4E8EB),
+    inverseOnSurface = Color(0xFF11181D),
+    surfaceTint = Mint,
+    scrim = Color(0xFF000000),
 )
 
-private val LightScheme = lightColorScheme(
-    primary = Color(0xFF005AC1),
+private val Light = lightColorScheme(
+    primary = Color(0xFF00695C),
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFD7E3FF),
-    onPrimaryContainer = Color(0xFF001A41),
-    secondary = Color(0xFF535F70),
-    onSecondary = Color.White,
-    secondaryContainer = Color(0xFFD7E0F0),
-    onSecondaryContainer = Color(0xFF101C2B),
-    background = Color(0xFFFDFBFF),
-    onBackground = Color(0xFF1A1C1E),
-    surface = Color(0xFFFDFBFF),
-    onSurface = Color(0xFF1A1C1E),
-    surfaceVariant = Color(0xFFE0E2EC),
-    onSurfaceVariant = Color(0xFF43474E),
-    outline = Color(0xFF73777F),
-    error = Color(0xFFBA1A1A),
-    onError = Color.White,
+    primaryContainer = Color(0xFFB8EFE1),
+    onPrimaryContainer = Color(0xFF00201A),
+    secondary = Color(0xFF2B5CA8),
+    tertiary = Color(0xFF7A5300),
+    tertiaryContainer = Color(0xFFFFE3B0),
+    onTertiaryContainer = Color(0xFF2A1D00),
+    error = Color(0xFFB3261E),
+    background = Color(0xFFF7F9FA),
+    onBackground = Color(0xFF11181D),
+    surface = Color(0xFFF7F9FA),
+    onSurface = Color(0xFF11181D),
+    surfaceVariant = Color(0xFFE6EBEE),
+    onSurfaceVariant = Color(0xFF4B555D),
+    outline = Color(0xFFA8B2B9),
 )
+
+/**
+ * Live numbers use tabular figures, not a monospace face.
+ *
+ * The problem being solved is a readout that jiggles as digits change width.
+ * Monospace fixes that and costs legibility -- "1.17" arrives with a full
+ * character cell around the decimal point. The `tnum` OpenType feature gives
+ * fixed-width digits in the normal face, which is the same guarantee without the
+ * gaps. Monospace is kept for paths, where it means "this is a literal string".
+ */
+private val GovernorTypography = Typography().let { base ->
+    base.copy(
+        headlineMedium = base.headlineMedium.copy(
+            fontWeight = FontWeight.Light, fontSize = 36.sp, fontFeatureSettings = "tnum",
+        ),
+        headlineSmall = base.headlineSmall.copy(
+            fontWeight = FontWeight.Light, fontFeatureSettings = "tnum",
+        ),
+        bodyMedium = base.bodyMedium.copy(fontFeatureSettings = "tnum"),
+        titleSmall = base.titleSmall.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 0.4.sp),
+        labelSmall = base.labelSmall.copy(fontFamily = FontFamily.Monospace),
+    )
+}
 
 @Composable
-fun GovernorTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,
-    content: @Composable () -> Unit,
-) {
-    val context = LocalContext.current
-    val scheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        darkTheme -> DarkScheme
-        else -> LightScheme
+fun GovernorTheme(content: @Composable () -> Unit) {
+    val dark = isSystemInDarkTheme()
+    val scheme = if (dark) Dark else Light
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        val context = LocalContext.current
+        SideEffect {
+            (context as? Activity)?.window?.let { window ->
+                WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !dark
+            }
+        }
     }
-    MaterialTheme(
-        colorScheme = scheme,
-        content = content,
-    )
+    MaterialTheme(colorScheme = scheme, typography = GovernorTypography) {
+        // Without this the activity shows the platform window background until the
+        // first Surface draws -- which, during a root probe, is several seconds of
+        // mid-grey with dark-grey text on it.
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = scheme.background,
+            content = content,
+        )
+    }
 }

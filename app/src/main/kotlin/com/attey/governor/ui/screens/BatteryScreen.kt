@@ -14,6 +14,11 @@ import androidx.compose.ui.unit.dp
 import com.attey.governor.core.BatteryNodes
 import com.attey.governor.core.LiveStats
 import com.attey.governor.ui.components.NotExposed
+import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.padding
+import com.attey.governor.ui.components.MonoText
+import com.attey.governor.ui.components.Readout
 import com.attey.governor.ui.components.SectionCard
 import com.attey.governor.ui.components.ValueRow
 
@@ -43,15 +48,12 @@ private fun NowCard(live: LiveStats) {
         if (mw == null) {
             NotExposed("draw")
         } else {
-            Text(
-                text = "$mw mW",
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                text = if (live.charging) "charging" else "discharging",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Readout(
+                value = "$mw",
+                unit = "mW",
+                color = if (live.charging) MaterialTheme.colorScheme.tertiary
+                else MaterialTheme.colorScheme.primary,
+                caption = if (live.charging) "charging" else "discharging",
             )
         }
         val pct = live.batteryPercent
@@ -71,33 +73,47 @@ private fun NowCard(live: LiveStats) {
 
 @Composable
 private fun HealthCard(battery: BatteryNodes?) {
-    SectionCard(title = "health") {
+    SectionCard(title = "health", subtitle = "capacity left against what it shipped with") {
         if (battery == null) {
             NotExposed("battery nodes")
             return@SectionCard
         }
-        if (battery.hasCurrent) {
-            ValueRow(label = "current_now", value = "(read from /sys)")
+        val health = battery.healthPercent
+        if (health == null) {
+            NotExposed("charge_full")
         } else {
-            NotExposed("current_now")
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    text = "$health",
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = when {
+                        health >= 85 -> MaterialTheme.colorScheme.primary
+                        health >= 70 -> MaterialTheme.colorScheme.tertiary
+                        else -> MaterialTheme.colorScheme.error
+                    },
+                )
+                Text(
+                    text = " % of design",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 6.dp),
+                )
+            }
+            ValueRow("full charge", "${battery.fullMah} mAh")
+            ValueRow("design", "${battery.designMah} mAh")
         }
-        if (battery.hasVoltage) {
-            ValueRow(label = "voltage_now", value = "(read from /sys)")
-        } else {
-            NotExposed("voltage_now")
-        }
-        if (battery.hasChargeFull) {
-            ValueRow(
-                label = "charge_full / design",
-                value = "shown as % when populated",
+        val cycles = battery.cycleCount
+        if (cycles == null) {
+            NotExposed("cycle_count")
+            Text(
+                "Some gauges report a cycle count of 0 or 1 forever. Rather than print " +
+                    "that as a fact, it is treated as unreported.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
-            NotExposed("charge_full")
+            ValueRow("cycles", cycles.toString())
         }
-        if (battery.hasCycleCount) {
-            ValueRow(label = "cycle_count", value = "(read from /sys)")
-        } else {
-            NotExposed("cycle_count")
-        }
+        MonoText(battery.path)
     }
 }

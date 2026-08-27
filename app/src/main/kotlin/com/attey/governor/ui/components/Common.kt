@@ -9,8 +9,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
@@ -210,10 +213,17 @@ fun ChoiceRow(
                 enabled = enabled,
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
             ) {
+                // The value carries the accent, not the label: a dropdown that
+                // renders exactly like static text is a control nobody presses.
                 Text(
                     text = selected,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = labelColor,
+                    color = if (enabled) MaterialTheme.colorScheme.primary else labelColor,
+                )
+                Icon(
+                    imageVector = Icons.Filled.ArrowDropDown,
+                    contentDescription = null,
+                    tint = if (enabled) MaterialTheme.colorScheme.primary else labelColor,
                 )
             }
             DropdownMenu(
@@ -252,3 +262,41 @@ fun MonoText(text: String) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
+
+
+/**
+ * A live readout: the number large and monospaced, the unit small beside it.
+ *
+ * One string in a monospace headline puts a full character cell between the
+ * number and its unit, which reads as a typo. Splitting them also stops the
+ * layout jumping when a digit is added.
+ */
+@Composable
+fun Readout(
+    value: String,
+    unit: String,
+    color: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurface,
+    caption: String? = null,
+) {
+    Row(verticalAlignment = Alignment.Bottom) {
+        Text(text = value, style = MaterialTheme.typography.headlineMedium, color = color)
+        Text(
+            text = " $unit",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 6.dp),
+        )
+        if (caption != null) {
+            Box(modifier = Modifier.weight(1f))
+            Text(
+                text = caption,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 6.dp),
+            )
+        }
+    }
+}
+
+/** The numeric half of [kHzToGHz], for use with [Readout]. */
+fun Long.kHzValue(): String = String.format(Locale.US, "%.2f", this / 1_000_000.0)

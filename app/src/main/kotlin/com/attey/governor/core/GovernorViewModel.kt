@@ -21,13 +21,134 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
     private val _capabilities = MutableStateFlow<List<Capability>>(emptyList())
     val capabilities: StateFlow<List<Capability>> = _capabilities.asStateFlow()
 
+    private val _profiles = MutableStateFlow<List<Profile>>(emptyList())
+    val profiles: StateFlow<List<Profile>> = _profiles.asStateFlow()
+
+    private val _triggers = MutableStateFlow<List<Trigger>>(emptyList())
+    val triggers: StateFlow<List<Trigger>> = _triggers.asStateFlow()
+
+    private val _measurement = MutableStateFlow<MeasureRun?>(null)
+    val measurement: StateFlow<MeasureRun?> = _measurement.asStateFlow()
+
+    private val _lastResult = MutableStateFlow<MeasureResult?>(null)
+    val lastResult: StateFlow<MeasureResult?> = _lastResult.asStateFlow()
+
+    private val _moduleExport = MutableStateFlow<String?>(null)
+    val moduleExport: StateFlow<String?> = _moduleExport.asStateFlow()
+
+    private val store = ProfileStore(app)
+    private var baseline: MeasureRun? = null
+    private var measureJob: Job? = null
+
     private var shell: RootShell? = null
     private var model: DeviceModel? = null
     private var liveJob: Job? = null
     private var revertJob: Job? = null
 
     init {
+        _profiles.value = store.loadProfiles()
+        _triggers.value = store.loadTriggers()
         refresh()
+    }
+
+    // ----------------------------------------------------------- Profiles
+
+    fun saveCurrentAsProfile(name: String) {
+        val m = model ?: return
+        val trimmed = name.trim()
+        if (trimmed.isEmpty() || _profiles.value.any { it.name.equals(trimmed, true) }) return
+        _profiles.value = _profiles.value + ProfileEngine.snapshot(m, trimmed)
+        store.saveProfiles(_profiles.value)
+    }
+
+    fun applyProfile(name: String) {
+        val sh = shell ?: return
+        val m = model ?: return
+        val profile = _profiles.value.firstOrNull { it.name == name } ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val rejections = ProfileEngine.apply(sh, m, profile)
+            reload(rejections.firstOrNull()?.let { "\"$name\": $it" })
+        }
+    }
+
+    fun deleteProfile(name: String) {
+        _profiles.value = _profiles.value.filterNot { it.name == name }
+        store.saveProfiles(_profiles.value)
+        // A trigger pointing at a profile that no longer exists would silently
+        // never fire, so it goes with it.
+        _triggers.value = _triggers.value.filterNot { it.profileName == name }
+        store.saveTriggers(_triggers.value)
+        TriggerService.sync(getApplication())
+    }
+
+    // ----------------------------------------------------------- Triggers
+
+    fun addTrigger(type: TriggerType, threshold: Int, profileName: String) {
+        if (_profiles.value.none { it.name == profileName }) return
+        _triggers.value = _triggers.value +
+            Trigger(System.currentTimeMillis(), type, threshold, profileName)
+        store.saveTriggers(_triggers.value)
+        TriggerService.sync(getApplication())
+    }
+
+    fun setTriggerEnabled(id: Long, enabled: Boolean) {
+        _triggers.value = _triggers.value.map { if (it.id == id) it.copy(enabled = enabled) else it }
+        store.saveTriggers(_triggers.value)
+        TriggerService.sync(getApplication())
+    }
+
+    fun deleteTrigger(id: Long) {
+        _triggers.value = _triggers.value.filterNot { it.id == id }
+        store.saveTriggers(_triggers.value)
+        TriggerService.sync(getApplication())
+    }
+
+    // -------------------------------------------------------- Measurement
+
+    /**
+     * One window. A null [profileName] measures the device as it stands and keeps
+     * that as the baseline; a named profile is applied first and then compared
+     * against it.
+     *
+     * Deliberately not a back-to-back double run: that doubles the wait and still
+     * cannot control for what the phone was doing, and one stored baseline can be
+     * compared against every profile in turn.
+     */
+    fun startMeasurement(profileName: String?, minutes: Int) {
+        val sh = shell ?: return
+        val m = model ?: return
+        measureJob?.cancel()
+        measureJob = viewModelScope.launch(Dispatchers.IO) {
+            if (profileName != null) {
+                _profiles.value.firstOrNull { it.name == profileName }
+                    ?.let { ProfileEngine.apply(sh, m, it) }
+            }
+            val label = profileName ?: "baseline"
+            val run = Measurement.window(sh, m, label, minutes * 60) { _measurement.value = it }
+            _measurement.value = run
+            if (profileName == null) {
+                baseline = run
+                _lastResult.value = null
+            } else {
+                baseline?.let { _lastResult.value = MeasureResult(it, run) }
+            }
+            reload(null)
+        }
+    }
+
+    fun stopMeasurement() {
+        measureJob?.cancel()
+        _measurement.value = _measurement.value?.copy(running = false)
+    }
+
+    fun exportMagiskModule(profileName: String) {
+        val m = model ?: return
+        val profile = _profiles.value.firstOrNull { it.name == profileName } ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            _moduleExport.value = runCatching {
+                MagiskModule.generate(getApplication(), m, profile).absolutePath
+            }.getOrNull()
+        }
     }
 
     fun refresh() {
@@ -57,12 +178,22 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
     private fun startLive() {
         liveJob?.cancel()
         liveJob = viewModelScope.launch(Dispatchers.IO) {
+            var tick = 0
             while (isActive) {
                 val sh = shell ?: break
                 val m = model ?: break
-                val live = DeviceProbe.sampleLive(sh, m)
+                val previous = (_state.value as? UiState.Ready)?.live?.hottestZone
+                val live = DeviceProbe.sampleLive(
+                    shell = sh,
+                    model = m,
+                    // 93 zones is too much to re-read twice a second's worth of
+                    // battery for a number that changes on the scale of minutes.
+                    includeThermal = tick % 5 == 0,
+                    previousHottest = previous,
+                )
                 val current = _state.value
                 if (current is UiState.Ready) _state.value = current.copy(live = live)
+                tick++
                 delay(2_000)
             }
         }
@@ -80,7 +211,7 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
         } else {
             listOf(p.minNode to min.toString(), p.maxNode to max.toString())
         }
-        guarded("${label(p)} ${fmt(min)}-${fmt(max)}", ops)
+        guarded("${label(p)} ${range(min, max)}", ops)
     }
 
     fun setPolicyGovernor(policyId: Int, governor: String) {
@@ -250,7 +381,9 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
         return m.clusterLabels.getOrNull(i) ?: "policy${p.id}"
     }
 
-    private fun fmt(kHz: Long) = String.format("%.2f GHz", kHz / 1_000_000.0)
+    private fun range(minKHz: Long, maxKHz: Long) = String.format(
+        java.util.Locale.US, "%.2f\u2013%.2f GHz", minKHz / 1_000_000.0, maxKHz / 1_000_000.0,
+    )
 
     override fun onCleared() {
         liveJob?.cancel()

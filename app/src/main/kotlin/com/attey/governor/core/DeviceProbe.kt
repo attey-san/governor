@@ -29,6 +29,7 @@ object DeviceProbe {
             thermalZones = probeThermal(shell),
             vmTunables = probeVm(shell),
             boost = probeBoost(shell),
+            zram = probeZram(shell),
             rootProvider = rootProvider,
             kernel = kernel,
         )
@@ -48,7 +49,8 @@ object DeviceProbe {
             "scaling_available_governors", "scaling_available_frequencies",
             "scaling_boost_frequencies", "stats/time_in_state",
         )
-        val read = shell.readAll(dirs.flatMap { d -> fields.map { "$d/$it" } })
+        val read = shell.readAll(dirs.flatMap { d -> fields.map { "$d/$it" } }) +
+            shell.readMultiline(dirs.map { "$it/stats/time_in_state" })
 
         // Governor tunables live at policyN/<current governor>/, so the governor
         // has to be known before the directory can be listed. Two round trips,
@@ -182,6 +184,9 @@ object DeviceProbe {
             hasVoltage = read["$path/voltage_now"]?.trim()?.toLongOrNull() != null,
             hasChargeFull = full > 0 && design > 0,
             hasCycleCount = cyclesUsable,
+            chargeFullUah = full,
+            chargeFullDesignUah = design,
+            cycleCount = cycles.takeIf { cyclesUsable },
         )
     }
 
@@ -194,7 +199,10 @@ object DeviceProbe {
         if (names.isEmpty()) return emptyList()
         val disks = names.toSet()
 
-        val fields = listOf("queue/scheduler", "queue/read_ahead_kb", "queue/nr_requests", "queue/rotational")
+        val fields = listOf(
+            "queue/scheduler", "queue/read_ahead_kb", "queue/nr_requests",
+            "queue/rotational", "size",
+        )
         val read = shell.readAll(names.flatMap { n -> fields.map { "/sys/block/$n/$it" } })
         val mounts = mountPoints(shell, disks)
 
@@ -211,8 +219,12 @@ object DeviceProbe {
                 rotational = read["/sys/block/$n/queue/rotational"]?.trim() == "1",
                 isVirtual = VIRTUAL_BLOCK.containsMatchIn(n),
                 mountedAt = mounts[n],
+                // /sys/block/*/size counts 512-byte sectors, always, regardless of
+                // the device's own logical block size.
+                sizeBytes = (read["/sys/block/$n/size"]?.trim()?.toLongOrNull() ?: 0) * 512,
             )
-        }.sortedWith(compareBy({ it.isVirtual }, { it.name }))
+        // Biggest real disk first: it is the one the user means.
+        }.sortedWith(compareBy<BlockDevice> { it.isVirtual }.thenByDescending { it.sizeBytes })
     }
 
     /**
@@ -305,6 +317,16 @@ object DeviceProbe {
         return SysNode.probe(shell, paths).mapKeys { it.key.substringAfterLast('/') }
     }
 
+    private val ZRAM_KNOBS = listOf(
+        "disksize", "comp_algorithm", "max_comp_streams", "mem_limit",
+        "mem_used_max", "mm_stat", "io_stat",
+    )
+
+    private fun probeZram(shell: RootShell): Map<String, SysNode> =
+        SysNode.probe(shell, ZRAM_KNOBS.map { "/sys/block/zram0/$it" })
+            .filterValues { it.exists }
+            .mapKeys { it.key.substringAfterLast('/') }
+
     // --------------------------------------------------------------- Live
 
     /**
@@ -318,7 +340,21 @@ object DeviceProbe {
      */
     @Volatile private var currentInMilliamps: Boolean? = null
 
-    fun sampleLive(shell: RootShell, model: DeviceModel): LiveStats {
+    /**
+     * The live tick.
+     *
+     * [includeThermal] exists because this device has 93 thermal zones and a
+     * battery monitor that re-read all of them every two seconds would be its own
+     * measurable load. Temperature does not move meaningfully in two seconds, so
+     * the caller samples it every fifth tick and carries [previousHottest]
+     * through the rest.
+     */
+    fun sampleLive(
+        shell: RootShell,
+        model: DeviceModel,
+        includeThermal: Boolean = true,
+        previousHottest: Pair<String, Float>? = null,
+    ): LiveStats {
         val bat = model.battery?.path
         val paths = buildList {
             model.policies.forEach { add("${it.path}/scaling_cur_freq") }
@@ -328,7 +364,9 @@ object DeviceProbe {
             if (bat != null) {
                 addAll(listOf("current_now", "voltage_now", "capacity", "temp", "status").map { "$bat/$it" })
             }
-            model.thermalZones.forEach { add("/sys/class/thermal/thermal_zone${it.id}/temp") }
+            if (includeThermal) {
+                model.thermalZones.forEach { add("/sys/class/thermal/thermal_zone${it.id}/temp") }
+            }
         }
         val read = shell.readAll(paths)
 
@@ -336,11 +374,11 @@ object DeviceProbe {
         val rawCurrent = read["$bat/current_now"]?.trim()?.toLongOrNull()
         val mW = milliwatts(rawCurrent, uV)
 
-        val zones = model.thermalZones.mapNotNull { z ->
+        val hottest = if (!includeThermal) previousHottest else model.thermalZones.mapNotNull { z ->
             val t = read["/sys/class/thermal/thermal_zone${z.id}/temp"]?.trim()?.toIntOrNull()
                 ?: return@mapNotNull null
             if (t <= -30_000) null else z.type to t / 1000f
-        }
+        }.maxByOrNull { it.second }
 
         return LiveStats(
             // Absent means absent. Defaulting an unreadable node to 0 renders as
@@ -362,7 +400,7 @@ object DeviceProbe {
             // +423827 uA while charging, others report negative for the same thing
             // -- but every one of them fills in `status` correctly.
             charging = read["$bat/status"]?.trim()?.startsWith("Charging", true) == true,
-            hottestZone = zones.maxByOrNull { it.second },
+            hottestZone = hottest,
             uptimeSeconds = read["/proc/uptime"]?.trim()?.substringBefore('.')?.toLongOrNull() ?: 0,
         )
     }
@@ -377,7 +415,7 @@ object DeviceProbe {
 
     /** policy id -> (kHz -> jiffies). Cumulative since boot; diff two of these. */
     fun timeInState(shell: RootShell, policies: List<CpuPolicy>): Map<Int, Map<Long, Long>> {
-        val read = shell.readAll(policies.map { "${it.path}/stats/time_in_state" })
+        val read = shell.readMultiline(policies.map { "${it.path}/stats/time_in_state" })
         return policies.associate { p ->
             p.id to read["${p.path}/stats/time_in_state"].orEmpty().lineSequence()
                 .mapNotNull { line ->

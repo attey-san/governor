@@ -48,16 +48,37 @@ class RootShell private constructor(
 
     /**
      * Reads many paths in one round trip. Returns path -> contents, omitting any
-     * that could not be read. Far cheaper than one exec per node.
+     * that do not exist.
+     *
+     * Uses the shell's `read` builtin rather than `cat`. Measured on the
+     * development device, 505 nodes cost 1356 ms through `cat` and 45 ms through
+     * `read` -- the whole difference is one fork per node, and a full probe
+     * touches roughly nine hundred of them. `v=` before each read matters: a
+     * failed read leaves the previous value in place, which would silently
+     * attribute one node's contents to the next.
+     *
+     * Only the first line is returned. Every tunable in this app is single-line;
+     * [readMultiline] exists for the ones that are not.
      */
     fun readAll(paths: List<String>): Map<String, String> {
         if (paths.isEmpty()) return emptyMap()
         val script = paths.joinToString("\n") { p ->
-            // %%GOV%% separates the key from the value; unreadable nodes emit nothing.
-            "if [ -r '$p' ]; then echo \"$p%%GOV%%\$(cat '$p' 2>/dev/null | head -c 8192 | tr '\\n' '\\r')\"; fi"
+            "if [ -e '$p' ]; then v=; IFS= read -r v < '$p' 2>/dev/null; echo \"$p%%GOV%%\$v\"; fi"
         }
-        val out = exec(script)
-        val map = HashMap<String, String>(paths.size)
+        return parse(exec(script))
+    }
+
+    /** For nodes with more than one line, such as cpufreq's time_in_state. */
+    fun readMultiline(paths: List<String>): Map<String, String> {
+        if (paths.isEmpty()) return emptyMap()
+        val script = paths.joinToString("\n") { p ->
+            "if [ -r '$p' ]; then echo \"$p%%GOV%%\$(cat '$p' 2>/dev/null | tr '\\n' '\\r')\"; fi"
+        }
+        return parse(exec(script))
+    }
+
+    private fun parse(out: String): Map<String, String> {
+        val map = HashMap<String, String>()
         for (line in out.lineSequence()) {
             val i = line.indexOf("%%GOV%%")
             if (i <= 0) continue

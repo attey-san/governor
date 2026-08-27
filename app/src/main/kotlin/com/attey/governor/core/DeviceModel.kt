@@ -15,6 +15,8 @@ data class DeviceModel(
     val thermalZones: List<ThermalZone> = emptyList(),
     val vmTunables: Map<String, SysNode> = emptyMap(),
     val boost: Map<String, SysNode> = emptyMap(),
+    /** zram0's knobs, keyed by bare name. Empty when the device has no zram. */
+    val zram: Map<String, SysNode> = emptyMap(),
     val rootProvider: String = "unknown",
     val kernel: String = "",
 ) {
@@ -82,7 +84,20 @@ data class BatteryNodes(
     val hasVoltage: Boolean,
     val hasChargeFull: Boolean,
     val hasCycleCount: Boolean,
-)
+    /** Microamp-hours the pack currently holds when full. 0 when not reported. */
+    val chargeFullUah: Long = 0,
+    val chargeFullDesignUah: Long = 0,
+    /** Null when the gauge does not report it, or reports something implausible. */
+    val cycleCount: Long? = null,
+) {
+    /** Present capacity as a percentage of what the pack shipped with. */
+    val healthPercent: Int?
+        get() = if (chargeFullUah > 0 && chargeFullDesignUah > 0)
+            (chargeFullUah * 100 / chargeFullDesignUah).toInt() else null
+
+    val fullMah: Long get() = chargeFullUah / 1000
+    val designMah: Long get() = chargeFullDesignUah / 1000
+}
 
 data class BlockDevice(
     val name: String,
@@ -99,7 +114,21 @@ data class BlockDevice(
      */
     val isVirtual: Boolean,
     val mountedAt: String? = null,
-)
+    /**
+     * Capacity in bytes. Phones expose a handful of tiny UFS LUNs alongside the
+     * real one -- this device has six, from 16 MB up -- and without a size they
+     * are indistinguishable from the 236 GB disk everything actually lives on.
+     */
+    val sizeBytes: Long = 0,
+) {
+    val sizeLabel: String
+        get() = when {
+            sizeBytes >= 1_000_000_000L -> "%.0f GB".format(sizeBytes / 1_000_000_000.0)
+            sizeBytes >= 1_000_000L -> "%.0f MB".format(sizeBytes / 1_000_000.0)
+            sizeBytes > 0 -> "$sizeBytes B"
+            else -> ""
+        }
+}
 
 data class ThermalZone(val id: Int, val type: String, val tempMilliC: Int) {
     /** Zones reading -40C or -273C are unpopulated, not cold. Never max across them blindly. */
