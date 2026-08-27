@@ -28,6 +28,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
+import com.attey.governor.core.DeviceModel
+import com.attey.governor.core.LiveStats
 import com.attey.governor.core.MeasureResult
 import com.attey.governor.core.MeasureRun
 import com.attey.governor.core.Profile
@@ -41,6 +43,8 @@ private const val BASELINE = "baseline (current settings)"
 
 @Composable
 fun MeasureScreen(
+    device: DeviceModel,
+    live: LiveStats,
     profiles: List<Profile>,
     run: MeasureRun?,
     result: MeasureResult?,
@@ -56,6 +60,19 @@ fun MeasureScreen(
         contentPadding = PaddingValues(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        if (live.charging) {
+            item {
+                SectionCard(title = "plugged in", subtitle = "measure anyway if you like") {
+                    Text(
+                        "While charging, current_now is the current going into the battery, " +
+                            "not what the phone is spending. A run taken now measures the " +
+                            "charger. Unplug first if you want the comparison to mean anything.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                }
+            }
+        }
         item {
             SectionCard(title = "measure", subtitle = "what a profile actually costs") {
                 Text(
@@ -91,7 +108,7 @@ fun MeasureScreen(
 
         if (run != null) item { RunCard(run) }
         if (result != null) item { ResultCard(result) }
-        if (run != null && run.residency.isNotEmpty()) item { ResidencyCard(run) }
+        if (run != null && run.residency.isNotEmpty()) item { ResidencyCard(run, device) }
     }
 }
 
@@ -189,11 +206,12 @@ private fun ResultCard(result: MeasureResult) {
 }
 
 @Composable
-private fun ResidencyCard(run: MeasureRun) {
+private fun ResidencyCard(run: MeasureRun, device: DeviceModel) {
     SectionCard(title = "residency", subtitle = "where the clusters actually sat") {
         run.residency.toSortedMap().forEach { (policyId, shares) ->
+            val index = device.policies.indexOfFirst { it.id == policyId }
             Text(
-                text = "policy$policyId",
+                text = device.clusterLabels.getOrNull(index) ?: "policy$policyId",
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp),

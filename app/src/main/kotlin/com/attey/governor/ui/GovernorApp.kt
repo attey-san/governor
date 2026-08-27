@@ -221,6 +221,8 @@ private fun ReadyScaffold(state: UiState.Ready, vm: GovernorViewModel) {
                     onExportModule = vm::exportMagiskModule,
                 )
                 7 -> MeasureScreen(
+                    device = state.device,
+                    live = state.live,
                     profiles = profiles,
                     run = measurement,
                     result = lastResult,

@@ -273,7 +273,7 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setPolicyGovernor(policyId: Int, governor: String) {
         val p = model?.policies?.firstOrNull { it.id == policyId } ?: return
-        guarded("${label(p)} governor -> $governor", listOf(p.govNode to governor))
+        guarded("${label(p)} governor \u2192 $governor", listOf(p.govNode to governor))
     }
 
     fun setCoreOnline(cpu: Int, online: Boolean) {
@@ -301,7 +301,7 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setGpuGovernor(governor: String) {
         val g = model?.gpus?.firstOrNull() ?: return
-        guarded("GPU governor -> $governor", listOf("${g.path}/governor" to governor))
+        guarded("GPU governor \u2192 $governor", listOf("${g.path}/governor" to governor))
     }
 
     fun setTunable(path: String, value: String) = direct(path, value)

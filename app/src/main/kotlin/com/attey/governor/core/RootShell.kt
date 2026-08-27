@@ -112,13 +112,37 @@ class RootShell private constructor(
         return parse(exec(script))
     }
 
-    /** For nodes with more than one line, such as cpufreq's time_in_state. */
+    /**
+     * For nodes with more than one line, such as cpufreq's time_in_state.
+     *
+     * Each line is emitted separately with the path in front, rather than joined
+     * with a separator. The obvious shortcut -- join with \r and split again --
+     * is silently wrong: BufferedReader.readLine() treats a bare \r as a line
+     * terminator, so the joined string comes back already split, and every chunk
+     * after the first arrives without the path marker and is discarded. The
+     * result is a function that quietly returns only the first line of any file.
+     *
+     * That bug produced a residency breakdown reading "0.71 GHz, 100%" -- entirely
+     * plausible, entirely an artefact of only ever seeing line one.
+     */
     fun readMultiline(paths: List<String>): Map<String, String> {
         if (paths.isEmpty()) return emptyMap()
         val script = paths.joinToString("\n") { p ->
-            "if [ -r '$p' ]; then echo \"$p%%GOV%%\$(cat '$p' 2>/dev/null | tr '\\n' '\\r')\"; fi"
+            "if [ -e '$p' ]; then while IFS= read -r l || [ -n \"\$l\" ]; do " +
+                "echo \"$p%%GOV%%\$l\"; done < '$p' 2>/dev/null; fi"
         }
-        return parse(exec(script))
+        val grouped = LinkedHashMap<String, StringBuilder>()
+        for (line in exec(script).lineSequence()) {
+            val i = line.indexOf("%%GOV%%")
+            if (i <= 0) continue
+            val key = line.substring(0, i)
+            val value = line.substring(i + 7)
+            grouped.getOrPut(key) { StringBuilder() }.let {
+                if (it.isNotEmpty()) it.append('\n')
+                it.append(value)
+            }
+        }
+        return grouped.mapValues { it.value.toString() }
     }
 
     private fun parse(out: String): Map<String, String> {
