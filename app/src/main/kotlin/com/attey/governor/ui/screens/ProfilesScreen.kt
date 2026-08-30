@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -82,7 +83,7 @@ fun ProfilesScreen(
                     ) {
                         Button(onClick = { onApply(p.name) }) { Text("Apply") }
                         OutlinedButton(onClick = { onExportModule(p.name) }) { Text("Module") }
-                        Column(modifier = Modifier.weight(1f)) {}
+                        Spacer(modifier = Modifier.weight(1f))
                         TextButton(onClick = { pendingDelete = p.name }) { Text("Delete") }
                     }
                 }
@@ -140,7 +141,7 @@ private fun SaveCard(profiles: List<Profile>, onSave: (String) -> Unit) {
                 isError = duplicate,
                 label = { Text(if (duplicate) "that name is taken" else "name") },
             )
-            Column(modifier = Modifier.width(8.dp)) {}
+            Spacer(modifier = Modifier.width(8.dp))
             Button(enabled = valid, onClick = { onSave(name.trim()); name = "" }) { Text("Save") }
         }
     }
@@ -246,16 +247,18 @@ private fun TriggersCard(
                     modifier = Modifier.weight(1f),
                 )
             } else {
-                Column(modifier = Modifier.weight(1f)) {}
+                Spacer(modifier = Modifier.weight(1f))
             }
             val app = chosenApp ?: apps.firstOrNull()
+            val level = threshold.toIntOrNull()
             Button(
                 enabled = names.isNotEmpty() && target.isNotEmpty() &&
+                    (!type.needsThreshold || level != null) &&
                     (!type.needsApp || (hasUsageAccess && app != null)),
                 onClick = {
                     onAdd(
                         type,
-                        threshold.toIntOrNull() ?: 0,
+                        level ?: 0,
                         target,
                         if (type.needsApp) app?.packageName.orEmpty() else "",
                         if (type.needsApp) app?.label.orEmpty() else "",

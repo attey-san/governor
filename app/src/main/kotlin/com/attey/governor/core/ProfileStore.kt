@@ -50,15 +50,29 @@ class ProfileStore(context: Context) {
         }.getOrDefault(emptyList())
     }
 
+    /**
+     * Written to a sibling and renamed over the target.
+     *
+     * `writeText` truncates before it writes, so a process death in that window
+     * leaves an empty file -- and [read] treats an unparseable file as an empty
+     * list, which means every saved profile disappears without a word. A rename
+     * inside one directory is atomic, so the file is either the old one or the
+     * new one.
+     */
     private fun write(file: File, objects: List<JSONObject>) {
         runCatching {
             val array = JSONArray()
             objects.forEach { array.put(it) }
-            file.writeText(array.toString(2))
+            val tmp = File(file.parentFile, "${file.name}.tmp")
+            tmp.writeText(array.toString(2))
+            if (!tmp.renameTo(file)) {
+                file.writeText(tmp.readText())
+                tmp.delete()
+            }
         }
     }
 
-    // ------------------------------------------------------------ Mapping
+    // --- Mapping
 
     private fun Profile.toJson() = JSONObject().apply {
         put("name", name)
@@ -76,17 +90,17 @@ class ProfileStore(context: Context) {
     private fun toProfile(o: JSONObject): Profile? {
         val name = o.optString("name").ifEmpty { return null }
         return Profile(
-        name = name,
-        policyMin = o.optJSONObject("policyMin").toLongMap(),
-        policyMax = o.optJSONObject("policyMax").toLongMap(),
-        governors = o.optJSONObject("governors").toStringMap()
-            .mapKeys { it.key.toIntOrNull() ?: -1 }.filterKeys { it >= 0 },
-        gpuMin = if (o.has("gpuMin")) o.optLong("gpuMin") else null,
-        gpuMax = if (o.has("gpuMax")) o.optLong("gpuMax") else null,
-        gpuGovernor = if (o.has("gpuGovernor")) o.optString("gpuGovernor") else null,
-        tunables = o.optJSONObject("tunables").toStringMap(),
-        vm = o.optJSONObject("vm").toStringMap(),
-        io = o.optJSONObject("io").toStringMap(),
+            name = name,
+            policyMin = o.optJSONObject("policyMin").toLongMap(),
+            policyMax = o.optJSONObject("policyMax").toLongMap(),
+            governors = o.optJSONObject("governors").toStringMap()
+                .mapKeys { it.key.toIntOrNull() ?: -1 }.filterKeys { it >= 0 },
+            gpuMin = if (o.has("gpuMin")) o.optLong("gpuMin") else null,
+            gpuMax = if (o.has("gpuMax")) o.optLong("gpuMax") else null,
+            gpuGovernor = if (o.has("gpuGovernor")) o.optString("gpuGovernor") else null,
+            tunables = o.optJSONObject("tunables").toStringMap(),
+            vm = o.optJSONObject("vm").toStringMap(),
+            io = o.optJSONObject("io").toStringMap(),
         )
     }
 

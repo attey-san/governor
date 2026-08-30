@@ -39,8 +39,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.attey.governor.core.Capability
 import com.attey.governor.core.GovernorViewModel
 import com.attey.governor.core.PendingRevert
 import com.attey.governor.core.UiState
@@ -54,6 +54,7 @@ import com.attey.governor.ui.screens.MeasureScreen
 import com.attey.governor.ui.screens.MemoryScreen
 import com.attey.governor.ui.screens.ProfilesScreen
 import com.attey.governor.ui.screens.ThermalScreen
+import java.util.Locale
 
 private val TABS = listOf(
     "CPU", "GPU", "Battery", "Thermal", "I/O", "Memory", "Profiles", "Measure", "Capability",
@@ -62,6 +63,11 @@ private val TABS = listOf(
 @Composable
 fun GovernorApp(vm: GovernorViewModel = viewModel()) {
     val state by vm.state.collectAsState()
+    // Sampling stops with the UI. See GovernorViewModel.onUiStarted.
+    LifecycleStartEffect(vm) {
+        vm.onUiStarted()
+        onStopOrDispose { vm.onUiStopped() }
+    }
     when (val s = state) {
         is UiState.Loading -> LoadingScreen()
         is UiState.NoRoot -> NoRootScreen(message = s.message, onRetry = vm::refresh)
@@ -143,7 +149,7 @@ private fun ReadyScaffold(state: UiState.Ready, vm: GovernorViewModel) {
                                     append(" cores")
                                     state.live.hottestZone?.let {
                                         append(" · ")
-                                        append("%.1f°C".format(it.second))
+                                        append(String.format(Locale.US, "%.1f°C", it.second))
                                     }
                                 },
                                 style = MaterialTheme.typography.bodySmall,
@@ -197,6 +203,7 @@ private fun ReadyScaffold(state: UiState.Ready, vm: GovernorViewModel) {
                     devices = state.device.blockDevices,
                     onSetScheduler = vm::setScheduler,
                     onSetReadAhead = vm::setReadAhead,
+                    onSetNrRequests = vm::setNrRequests,
                 )
                 5 -> MemoryScreen(
                     device = state.device,
@@ -256,7 +263,7 @@ private fun PendingBar(pending: PendingRevert, onConfirm: () -> Unit, onRevert: 
                 style = MaterialTheme.typography.bodySmall,
             )
             LinearProgressIndicator(
-                progress = { pending.secondsLeft / 30f },
+                progress = { pending.fractionLeft },
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                 color = MaterialTheme.colorScheme.onTertiaryContainer,
             )
@@ -276,6 +283,3 @@ private fun PendingBar(pending: PendingRevert, onConfirm: () -> Unit, onRevert: 
         }
     }
 }
-
-/** Kept so the capability list keeps its type import when tabs are reordered. */
-private typealias CapabilityList = List<Capability>

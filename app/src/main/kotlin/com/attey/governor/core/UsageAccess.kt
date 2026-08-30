@@ -5,6 +5,7 @@ import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Process
 import android.provider.Settings
 
@@ -26,14 +27,27 @@ object UsageAccess {
      * PACKAGE_USAGE_STATS is an appop, not a runtime permission. It cannot be
      * requested from a dialog -- the user has to grant it in Settings -- so the
      * UI has to be able to ask whether it is held.
+     *
+     * `unsafeCheckOpNoThrow` only exists from API 29. Below that the same query
+     * is `checkOpNoThrow`, which is deprecated but is the only one there; calling
+     * the newer name on Android 8 or 9 is a NoSuchMethodError on the first frame.
      */
+    @Suppress("DEPRECATION")
     fun hasAccess(context: Context): Boolean {
         val ops = context.getSystemService(AppOpsManager::class.java) ?: return false
-        val mode = ops.unsafeCheckOpNoThrow(
-            AppOpsManager.OPSTR_GET_USAGE_STATS,
-            Process.myUid(),
-            context.packageName,
-        )
+        val mode = if (Build.VERSION.SDK_INT >= 29) {
+            ops.unsafeCheckOpNoThrow(
+                AppOpsManager.OPSTR_GET_USAGE_STATS,
+                Process.myUid(),
+                context.packageName,
+            )
+        } else {
+            ops.checkOpNoThrow(
+                AppOpsManager.OPSTR_GET_USAGE_STATS,
+                Process.myUid(),
+                context.packageName,
+            )
+        }
         return mode == AppOpsManager.MODE_ALLOWED
     }
 
@@ -45,8 +59,12 @@ object UsageAccess {
      *
      * Read from the event stream rather than `queryUsageStats`, whose buckets are
      * coarse enough to lag by minutes.
+     *
+     * [sinceMs] wants headroom over the caller's poll interval. A window exactly
+     * one interval wide has no room for the poll's own drift, and a switch that
+     * falls in the gap is never seen at all.
      */
-    fun foregroundPackage(context: Context, sinceMs: Long = 10_000): String? {
+    fun foregroundPackage(context: Context, sinceMs: Long): String? {
         if (!hasAccess(context)) return null
         val usage = context.getSystemService(UsageStatsManager::class.java) ?: return null
         val now = System.currentTimeMillis()

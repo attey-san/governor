@@ -1,5 +1,7 @@
 package com.attey.governor.core
 
+import java.util.Locale
+
 /**
  * What this particular kernel actually exposes.
  *
@@ -53,7 +55,6 @@ data class CpuPolicy(
     val availableGovernors: List<String>,
     /** Auto-discovered from policyN/<governor>/ -- never a hardcoded list. */
     val governorTunables: Map<String, SysNode> = emptyMap(),
-    val coreCtl: Map<String, SysNode> = emptyMap(),
 ) {
     val maxNode get() = "$path/scaling_max_freq"
     val minNode get() = "$path/scaling_min_freq"
@@ -65,9 +66,6 @@ data class CpuPolicy(
      * say so rather than showing a slider that appears broken.
      */
     val isCappedBelowHardware: Boolean get() = scalingMax < hwMax
-
-    fun nearestFreq(target: Long): Long =
-        availableFreqs.minByOrNull { kotlin.math.abs(it - target) } ?: target
 }
 
 data class GpuDevice(
@@ -82,10 +80,6 @@ data class GpuDevice(
 
 data class BatteryNodes(
     val path: String,
-    val hasCurrent: Boolean,
-    val hasVoltage: Boolean,
-    val hasChargeFull: Boolean,
-    val hasCycleCount: Boolean,
     /** Microamp-hours the pack currently holds when full. 0 when not reported. */
     val chargeFullUah: Long = 0,
     val chargeFullDesignUah: Long = 0,
@@ -125,8 +119,10 @@ data class BlockDevice(
 ) {
     val sizeLabel: String
         get() = when {
-            sizeBytes >= 1_000_000_000L -> "%.0f GB".format(sizeBytes / 1_000_000_000.0)
-            sizeBytes >= 1_000_000L -> "%.0f MB".format(sizeBytes / 1_000_000.0)
+            sizeBytes >= 1_000_000_000L ->
+                String.format(Locale.US, "%.0f GB", sizeBytes / 1_000_000_000.0)
+            sizeBytes >= 1_000_000L ->
+                String.format(Locale.US, "%.0f MB", sizeBytes / 1_000_000.0)
             sizeBytes > 0 -> "$sizeBytes B"
             else -> ""
         }

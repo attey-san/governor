@@ -10,6 +10,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -23,6 +24,7 @@ import com.attey.governor.ui.components.NotExposed
 import com.attey.governor.ui.components.Readout
 import com.attey.governor.ui.components.SectionCard
 import com.attey.governor.ui.components.ValueRow
+import java.util.Locale
 
 @Composable
 fun GpuScreen(
@@ -61,7 +63,7 @@ private fun GpuCard(
             NotExposed("current frequency")
         } else {
             Readout(
-                value = String.format(java.util.Locale.US, "%.0f", curFreq / 1_000_000.0),
+                value = String.format(Locale.US, "%.0f", curFreq / 1_000_000.0),
                 unit = "MHz",
                 color = MaterialTheme.colorScheme.primary,
                 caption = gpu.governor,
@@ -72,8 +74,8 @@ private fun GpuCard(
         } else {
             ValueRow(label = "busy", value = "$busy%")
         }
-        var min by remember(gpu.minFreq) { mutableStateOf(gpu.minFreq) }
-        var max by remember(gpu.maxFreq) { mutableStateOf(gpu.maxFreq) }
+        var min by remember(gpu.minFreq) { mutableLongStateOf(gpu.minFreq) }
+        var max by remember(gpu.maxFreq) { mutableLongStateOf(gpu.maxFreq) }
         FreqSlider(
             label = "min",
             steps = gpu.availableFreqs,

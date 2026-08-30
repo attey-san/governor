@@ -2,6 +2,7 @@ package com.attey.governor.core
 
 import android.content.Context
 import java.io.File
+import java.util.Locale
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -18,8 +19,12 @@ object MagiskModule {
     private const val BOOT_DELAY_SECONDS = 45
 
     fun generate(context: Context, model: DeviceModel, profile: Profile): File {
-        val safeName = profile.name.replace(Regex("[^A-Za-z0-9_-]"), "_").lowercase()
-        val out = File(context.getExternalFilesDir(null), "governor-$safeName.zip")
+        val safeName = profile.name.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9_-]"), "_")
+        // Falls back to internal storage: getExternalFilesDir returns null while
+        // external storage is unmounted, and File(null, name) would quietly write
+        // a relative path into the process's working directory.
+        val dir = context.getExternalFilesDir(null) ?: context.filesDir
+        val out = File(dir, "governor-$safeName.zip")
 
         val prop = """
             id=governor_$safeName

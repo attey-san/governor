@@ -21,6 +21,7 @@ import com.attey.governor.ui.components.MonoText
 import com.attey.governor.ui.components.Readout
 import com.attey.governor.ui.components.SectionCard
 import com.attey.governor.ui.components.ValueRow
+import java.util.Locale
 
 @Composable
 fun BatteryScreen(
@@ -32,12 +33,8 @@ fun BatteryScreen(
         contentPadding = PaddingValues(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        items(listOf(Unit)) { _ ->
-            NowCard(live = live)
-        }
-        items(listOf(Unit)) { _ ->
-            HealthCard(battery = battery)
-        }
+        item { NowCard(live = live) }
+        item { HealthCard(battery = battery) }
     }
 }
 
@@ -66,7 +63,7 @@ private fun NowCard(live: LiveStats) {
         if (temp == null) {
             NotExposed("temperature")
         } else {
-            ValueRow(label = "temperature", value = "%.1f \u00B0C".format(temp))
+            ValueRow(label = "temperature", value = String.format(Locale.US, "%.1f \u00B0C", temp))
         }
     }
 }

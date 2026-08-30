@@ -37,7 +37,7 @@ object DeviceProbe {
         )
     }
 
-    // ---------------------------------------------------------------- CPU
+    // --- CPU
 
     private fun probePolicies(shell: RootShell): List<CpuPolicy> {
         val dirs = shell.lines("ls -d $CPUFREQ/policy* 2>/dev/null")
@@ -60,7 +60,7 @@ object DeviceProbe {
         val govDirs = dirs.mapNotNull { d ->
             read["$d/scaling_governor"]?.trim()?.takeIf { it.isNotEmpty() }?.let { "$d/$it" }
         }
-        val listings = listDirs(shell, govDirs + dirs.map { "$it/core_ctl" })
+        val listings = listDirs(shell, govDirs)
         val tunablePaths = listings.flatMap { (dir, names) -> names.map { "$dir/$it" } }
         val nodes = SysNode.probe(shell, tunablePaths)
 
@@ -94,8 +94,6 @@ object DeviceProbe {
                     ?.split(Regex("\\s+"))?.filter { it.isNotBlank() }.orEmpty(),
                 governorTunables = nodes.filterKeys { it.startsWith("$d/$gov/") }
                     .mapKeys { it.key.substringAfterLast('/') },
-                coreCtl = nodes.filterKeys { it.startsWith("$d/core_ctl/") }
-                    .mapKeys { it.key.substringAfterLast('/') },
             )
         }
     }
@@ -111,7 +109,7 @@ object DeviceProbe {
         }
     }
 
-    // ---------------------------------------------------------------- GPU
+    // --- GPU
 
     /**
      * Bandwidth and latency monitors sit in the same devfreq class as the GPU and
@@ -142,8 +140,9 @@ object DeviceProbe {
         return dirs.map { d ->
             val freqs = numbers(read["$d/available_frequencies"])
             GpuDevice(
-                name = read["/sys/class/kgsl/kgsl-3d0/gpu_model"]?.trim()
-                    ?: read["$d/name"]?.trim().orEmpty().ifEmpty { d.substringAfterLast('/') },
+                name = read["/sys/class/kgsl/kgsl-3d0/gpu_model"]?.trim().orEmpty()
+                    .ifEmpty { read["$d/name"]?.trim().orEmpty() }
+                    .ifEmpty { d.substringAfterLast('/') },
                 path = d,
                 availableFreqs = freqs,
                 minFreq = read["$d/min_freq"]?.trim()?.toLongOrNull() ?: freqs.firstOrNull() ?: 0,
@@ -155,7 +154,7 @@ object DeviceProbe {
         }
     }
 
-    // ------------------------------------------------------------ Battery
+    // --- Battery
 
     private fun probeBattery(shell: RootShell): BatteryNodes? {
         val supplies = shell.lines("ls -d /sys/class/power_supply/* 2>/dev/null")
@@ -167,7 +166,7 @@ object DeviceProbe {
         val path = batteries.firstOrNull { it.endsWith("/battery") } ?: batteries.firstOrNull()
             ?: return null
 
-        val n = listOf("current_now", "voltage_now", "charge_full", "charge_full_design", "cycle_count")
+        val n = listOf("charge_full", "charge_full_design", "cycle_count")
         val read = shell.readAll(n.map { "$path/$it" })
         val full = read["$path/charge_full"]?.trim()?.toLongOrNull() ?: 0
         val design = read["$path/charge_full_design"]?.trim()?.toLongOrNull() ?: 0
@@ -182,17 +181,13 @@ object DeviceProbe {
 
         return BatteryNodes(
             path = path,
-            hasCurrent = read["$path/current_now"]?.trim()?.toLongOrNull() != null,
-            hasVoltage = read["$path/voltage_now"]?.trim()?.toLongOrNull() != null,
-            hasChargeFull = full > 0 && design > 0,
-            hasCycleCount = cyclesUsable,
             chargeFullUah = full,
             chargeFullDesignUah = design,
             cycleCount = cycles.takeIf { cyclesUsable },
         )
     }
 
-    // -------------------------------------------------------------- Block
+    // --- Block
 
     private val VIRTUAL_BLOCK = Regex("^(dm-|loop|ram|zram|md|sr)")
 
@@ -283,7 +278,7 @@ object DeviceProbe {
         return if (base.isNotEmpty() && base in disks) base else null
     }
 
-    // ------------------------------------------------------- Thermal / vm
+    // --- Thermal / vm
 
     private fun probeThermal(shell: RootShell): List<ThermalZone> {
         val dirs = shell.lines("ls -d /sys/class/thermal/thermal_zone* 2>/dev/null")
@@ -332,7 +327,7 @@ object DeviceProbe {
             .filterValues { it.exists }
             .mapKeys { it.key.substringAfterLast('/') }
 
-    // --------------------------------------------------------------- Live
+    // --- Live
 
     /**
      * True when current_now is reported in milliamps rather than microamps.
@@ -417,9 +412,12 @@ object DeviceProbe {
     private fun milliwatts(rawCurrent: Long?, uV: Long?): Int? {
         if (rawCurrent == null || uV == null || uV <= 0) return null
         if (rawCurrent == 0L) return 0
-        val asMicroamps = abs(rawCurrent).toDouble() * uV / 1_000_000_000.0
-        val milliamps = currentInMilliamps ?: (asMicroamps < 5.0).also { currentInMilliamps = it }
-        return (if (milliamps) asMicroamps * 1000 else asMicroamps).roundToInt()
+        // uA x uV lands in milliwatts once, at 1e9. Computed on the microamp
+        // assumption first, because whether that assumption held is exactly what
+        // the size of the answer tells us.
+        val mWIfMicroamps = abs(rawCurrent).toDouble() * uV / 1_000_000_000.0
+        val milliamps = currentInMilliamps ?: (mWIfMicroamps < 5.0).also { currentInMilliamps = it }
+        return (if (milliamps) mWIfMicroamps * 1000 else mWIfMicroamps).roundToInt()
     }
 
     /** policy id -> (kHz -> jiffies). Cumulative since boot; diff two of these. */
@@ -435,7 +433,7 @@ object DeviceProbe {
         }
     }
 
-    // ------------------------------------------------------------ Helpers
+    // --- Helpers
 
     private fun RootShell.lines(cmd: String): List<String> =
         exec(cmd).lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()

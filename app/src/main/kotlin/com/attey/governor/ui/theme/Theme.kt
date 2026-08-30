@@ -93,6 +93,16 @@ private val Light = lightColorScheme(
     surfaceVariant = Color(0xFFE6EBEE),
     onSurfaceVariant = Color(0xFF4B555D),
     outline = Color(0xFFA8B2B9),
+    // The same violet leak as above: a light scheme that names no container
+    // colours gets Material's, and the slider track goes purple here too.
+    secondaryContainer = Color(0xFFD8E4F7),
+    onSecondaryContainer = Color(0xFF15305C),
+    surfaceContainerLowest = Color(0xFFFFFFFF),
+    surfaceContainerLow = Color(0xFFF1F4F6),
+    surfaceContainer = Color(0xFFEBEFF2),
+    surfaceContainerHigh = Color(0xFFE4E9EC),
+    surfaceContainerHighest = Color(0xFFDDE3E7),
+    surfaceTint = Color(0xFF00695C),
 )
 
 /**

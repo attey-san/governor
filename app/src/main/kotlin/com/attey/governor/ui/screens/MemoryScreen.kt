@@ -3,15 +3,10 @@ package com.attey.governor.ui.screens
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -19,16 +14,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.attey.governor.core.DeviceModel
-import com.attey.governor.core.SysNode
 import com.attey.governor.ui.components.ChoiceRow
+import com.attey.governor.ui.components.EditableRow
 import com.attey.governor.ui.components.NotExposed
 import com.attey.governor.ui.components.SectionCard
 import com.attey.governor.ui.components.ValueRow
+import java.util.Locale
 
 @Composable
 fun MemoryScreen(
@@ -75,7 +69,7 @@ private fun ZramCard(device: DeviceModel, onSet: (String, String) -> Unit) {
         device.zram["mm_stat"]?.value?.split(Regex("\\s+"))?.mapNotNull { it.toLongOrNull() }
             ?.takeIf { it.size >= 2 && it[1] > 0 }?.let { f ->
                 ValueRow("stored", "${f[0] / 1024 / 1024} MB in ${f[1] / 1024 / 1024} MB")
-                ValueRow("ratio", String.format(java.util.Locale.US, "%.2fx", f[0].toFloat() / f[1]))
+                ValueRow("ratio", String.format(Locale.US, "%.2fx", f[0].toFloat() / f[1]))
             }
     }
 }
@@ -145,37 +139,3 @@ private fun VmCard(device: DeviceModel, onSetVm: (String, String) -> Unit) {
         }
     }
 }
-
-/** A label with an editable value that commits on the keyboard's done action. */
-@Composable
-private fun EditableRow(
-    label: String,
-    value: String,
-    enabled: Boolean,
-    onCommit: (String) -> Unit,
-) {
-    var text by remember(value) { mutableStateOf(value) }
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            text = label,
-            modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (enabled) MaterialTheme.colorScheme.onSurface
-            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
-        )
-        OutlinedTextField(
-            value = text,
-            onValueChange = { text = it },
-            enabled = enabled,
-            singleLine = true,
-            modifier = Modifier.width(150.dp),
-            textStyle = MaterialTheme.typography.bodyMedium,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { onCommit(text.trim()) }),
-        )
-    }
-}
-
-/** Kept for callers that only need a read-only node row. */
-@Composable
-fun NodeRow(name: String, node: SysNode) = ValueRow(name, node.value, enabled = node.isUsable)

@@ -16,10 +16,10 @@ import java.io.OutputStreamWriter
  * Deliberately dependency-free: libsu would do this too, but this is sixty lines
  * and removes a version we would otherwise have to track.
  *
- * IMPORTANT: never do arithmetic inside this shell. Android's /system/bin/sh is
- * mksh and its $(( )) is 32-bit -- it wraps silently above 2^31, which is below
- * several counters we read (block sectors, /proc/<pid>/io, uptime in ns). Emit
- * raw strings here and do the maths in Kotlin.
+ * Never do arithmetic in here. Android's /system/bin/sh is mksh and its $(( ))
+ * is 32-bit: it wraps silently above 2^31, which is below several counters this
+ * app reads (block sectors, /proc/<pid>/io, uptime in ns). Emit raw strings and
+ * do the maths in Kotlin.
  */
 class RootShell private constructor(
     private val process: Process,
@@ -58,10 +58,12 @@ class RootShell private constructor(
             if (line == null) {
                 // Either the shell died or it stopped answering. Both mean this
                 // instance can no longer be trusted to line up commands with
-                // their output.
+                // their output. Discard what arrived: a half-finished readAll
+                // looks exactly like a device where those nodes do not exist,
+                // and the UI would grey out working controls without a word.
                 broken = true
                 runCatching { process.destroy() }
-                return sb.toString()
+                return ""
             }
             if (line == sentinel) break
             if (sb.isNotEmpty()) sb.append('\n')
@@ -150,7 +152,7 @@ class RootShell private constructor(
         for (line in out.lineSequence()) {
             val i = line.indexOf("%%GOV%%")
             if (i <= 0) continue
-            map[line.substring(0, i)] = line.substring(i + 7).replace('\r', '\n').trim()
+            map[line.substring(0, i)] = line.substring(i + 7).trim()
         }
         return map
     }

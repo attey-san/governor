@@ -19,6 +19,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Watches for the conditions a user attached a profile to, and applies it.
@@ -45,9 +46,9 @@ class TriggerService : Service() {
      * "below 30%" trigger would re-apply its profile a hundred times on the way
      * from 30 to 20, fighting anything the user did by hand in between.
      */
-    private val armed = java.util.concurrent.ConcurrentHashMap<Long, Boolean>()
+    private val armed = ConcurrentHashMap<Long, Boolean>()
 
-    private var appPollJob: Job? = null
+    @Volatile private var appPollJob: Job? = null
     @Volatile private var screenOn = true
     @Volatile private var currentApp: String? = null
 
@@ -125,10 +126,9 @@ class TriggerService : Service() {
     }
 
     private suspend fun checkForegroundApp() {
-        val pkg = UsageAccess.foregroundPackage(this) ?: return
+        val pkg = UsageAccess.foregroundPackage(this, APP_POLL_MS * 2) ?: return
         if (pkg == currentApp) return
         val previous = currentApp
-        currentApp = pkg
 
         val entering = triggers.firstOrNull {
             it.type == TriggerType.APP_FOREGROUND && it.packageName == pkg
@@ -137,8 +137,12 @@ class TriggerService : Service() {
             it.type == TriggerType.APP_FOREGROUND && it.packageName == previous
         }
 
+        // Not before this point. Root can be momentarily unavailable, and a
+        // currentApp already moved on would make the next poll see no change and
+        // skip the trigger permanently.
         val shell = RootShell.get() ?: return
         val device = model ?: DeviceProbe.probe(shell).also { model = it }
+        currentApp = pkg
 
         if (leaving && entering == null) {
             beforeApp?.let {
@@ -180,11 +184,18 @@ class TriggerService : Service() {
 
         val out = mutableListOf<Trigger>()
         for (t in triggers) {
-            val over = when (t.type) {
-                TriggerType.BATTERY_BELOW -> percent?.let { it < t.threshold }
-                TriggerType.TEMP_ABOVE -> tempC?.let { it > t.threshold }
+            // The reading this trigger watches, and which side of the threshold
+            // it is on. Both come out of one lookup so the re-arm below cannot
+            // read a value the test above never saw.
+            val reading = when (t.type) {
+                TriggerType.BATTERY_BELOW -> percent
+                TriggerType.TEMP_ABOVE -> tempC
                 else -> null
             } ?: continue
+            val over = when (t.type) {
+                TriggerType.BATTERY_BELOW -> reading < t.threshold
+                else -> reading > t.threshold
+            }
 
             val isArmed = armed[t.id] ?: true
             if (over && isArmed) {
@@ -194,8 +205,8 @@ class TriggerService : Service() {
                 // Re-arm with a few points of hysteresis so a value sitting exactly
                 // on the threshold does not oscillate.
                 val clear = when (t.type) {
-                    TriggerType.BATTERY_BELOW -> percent!! >= t.threshold + HYSTERESIS
-                    else -> tempC!! <= t.threshold - HYSTERESIS
+                    TriggerType.BATTERY_BELOW -> reading >= t.threshold + HYSTERESIS
+                    else -> reading <= t.threshold - HYSTERESIS
                 }
                 if (clear) armed[t.id] = true
             }
@@ -214,7 +225,7 @@ class TriggerService : Service() {
         )
     }
 
-    // ------------------------------------------------------- Notification
+    // --- Notification
 
     private fun notify(text: String) {
         val nm = getSystemService(NotificationManager::class.java)
@@ -223,7 +234,7 @@ class TriggerService : Service() {
 
     private fun notification(text: String): Notification {
         val nm = getSystemService(NotificationManager::class.java)
-        if (Build.VERSION.SDK_INT >= 26 && nm.getNotificationChannel(CHANNEL) == null) {
+        if (nm.getNotificationChannel(CHANNEL) == null) {
             nm.createNotificationChannel(
                 NotificationChannel(CHANNEL, "Triggers", NotificationManager.IMPORTANCE_LOW)
                     .apply { description = "Shows which profile Governor last applied" }

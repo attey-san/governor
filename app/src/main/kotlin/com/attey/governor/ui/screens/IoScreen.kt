@@ -3,6 +3,8 @@ package com.attey.governor.ui.screens
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -24,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.attey.governor.core.BlockDevice
 import com.attey.governor.ui.components.ChoiceRow
+import com.attey.governor.ui.components.EditableRow
 import com.attey.governor.ui.components.SectionCard
 import com.attey.governor.ui.components.ValueRow
 
@@ -32,6 +35,7 @@ fun IoScreen(
     devices: List<BlockDevice>,
     onSetScheduler: (deviceName: String, scheduler: String) -> Unit,
     onSetReadAhead: (deviceName: String, kb: Long) -> Unit,
+    onSetNrRequests: (deviceName: String, requests: Long) -> Unit,
 ) {
     val real = devices.filterNot { it.isVirtual }
     val virtual = devices.filter { it.isVirtual }
@@ -43,15 +47,13 @@ fun IoScreen(
         items(real) { dev ->
             BlockCard(
                 dev = dev,
-                editable = true,
                 onSetScheduler = { onSetScheduler(dev.name, it) },
                 onSetReadAhead = { onSetReadAhead(dev.name, it) },
+                onSetNrRequests = { onSetNrRequests(dev.name, it) },
             )
         }
         if (virtual.isNotEmpty()) {
-            items(listOf(Unit)) { _ ->
-                VirtualCollapsed(virtual = virtual)
-            }
+            item { VirtualCollapsed(virtual = virtual) }
         }
     }
 }
@@ -59,34 +61,32 @@ fun IoScreen(
 @Composable
 private fun BlockCard(
     dev: BlockDevice,
-    editable: Boolean,
     onSetScheduler: (String) -> Unit,
     onSetReadAhead: (Long) -> Unit,
+    onSetNrRequests: (Long) -> Unit,
 ) {
     val subtitle = listOfNotNull(
         dev.sizeLabel.ifEmpty { null },
         dev.mountedAt?.let { "mounted at $it" },
         if (dev.rotational) "rotational" else "non-rotational",
-        if (dev.isVirtual) "virtual" else null,
-    ).joinToString(" \u00B7 ")
+    ).joinToString(" · ")
     SectionCard(title = dev.name, subtitle = subtitle.ifEmpty { null }) {
         ChoiceRow(
             label = "scheduler",
             options = dev.availableSchedulers,
             selected = dev.scheduler,
-            enabled = editable && dev.availableSchedulers.size > 1,
+            enabled = dev.availableSchedulers.size > 1,
             onSelect = onSetScheduler,
         )
-        ValueRow(
-            label = "read_ahead_kb",
-            value = dev.readAheadKb.toString(),
-            enabled = editable,
-        )
-        ValueRow(
-            label = "nr_requests",
-            value = dev.nrRequests.toString(),
-            enabled = editable,
-        )
+        // Both take a plain integer and reject anything else, so a value that
+        // will not parse is dropped here rather than sent to the kernel to be
+        // refused with a message about a node the user never typed.
+        EditableRow("read_ahead_kb", dev.readAheadKb.toString()) { v ->
+            v.toLongOrNull()?.let(onSetReadAhead)
+        }
+        EditableRow("nr_requests", dev.nrRequests.toString()) { v ->
+            v.toLongOrNull()?.let(onSetNrRequests)
+        }
     }
 }
 
@@ -94,7 +94,7 @@ private fun BlockCard(
 private fun VirtualCollapsed(virtual: List<BlockDevice>) {
     var expanded by remember { mutableStateOf(false) }
     SectionCard(title = "Virtual devices") {
-        androidx.compose.foundation.layout.Row(
+        Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -103,7 +103,7 @@ private fun VirtualCollapsed(virtual: List<BlockDevice>) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.weight(1f))
+            Spacer(modifier = Modifier.weight(1f))
             Text(
                 text = "${virtual.size}",
                 style = MaterialTheme.typography.bodyMedium,
@@ -121,14 +121,17 @@ private fun VirtualCollapsed(virtual: List<BlockDevice>) {
                 modifier = Modifier.padding(top = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                virtual.forEach { dev ->
-                    VirtualRow(dev)
-                }
+                virtual.forEach { dev -> VirtualRow(dev) }
             }
         }
     }
 }
 
+/**
+ * Read-only. A dm target's queue sits above the real device's and tuning it
+ * moves nothing; showing the values is still worth it, because a scheduler of
+ * `none` on dm-46 is the usual reason /data looks untuned.
+ */
 @Composable
 private fun VirtualRow(dev: BlockDevice) {
     Text(
@@ -136,14 +139,6 @@ private fun VirtualRow(dev: BlockDevice) {
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    ValueRow(
-        label = "scheduler",
-        value = dev.scheduler,
-        enabled = false,
-    )
-    ValueRow(
-        label = "read_ahead_kb",
-        value = dev.readAheadKb.toString(),
-        enabled = false,
-    )
+    ValueRow(label = "scheduler", value = dev.scheduler, enabled = false)
+    ValueRow(label = "read_ahead_kb", value = dev.readAheadKb.toString(), enabled = false)
 }

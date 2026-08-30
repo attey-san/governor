@@ -1,8 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  A frequency ladder: the steps a cpufreq policy can actually take, with the
-  ceiling drawn short because something is nearly always holding it down.
--->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"

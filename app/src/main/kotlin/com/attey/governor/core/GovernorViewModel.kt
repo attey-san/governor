@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Locale
 
 class GovernorViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -50,6 +51,7 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
     private var model: DeviceModel? = null
     private var liveJob: Job? = null
     private var revertJob: Job? = null
+    private var capabilityJob: Job? = null
 
     init {
         _profiles.value = store.loadProfiles()
@@ -72,7 +74,7 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
         store.saveProfiles(_profiles.value)
     }
 
-    // ----------------------------------------------------------- Profiles
+    // --- Profiles
 
     fun saveCurrentAsProfile(name: String) {
         val m = model ?: return
@@ -102,7 +104,7 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
         TriggerService.sync(getApplication())
     }
 
-    // ----------------------------------------------------------- Triggers
+    // --- Triggers
 
     fun addTrigger(
         type: TriggerType,
@@ -115,7 +117,7 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
         if (type.needsApp && packageName.isEmpty()) return
         _triggers.value = _triggers.value +
             Trigger(
-                id = System.currentTimeMillis(),
+                id = nextTriggerId(),
                 type = type,
                 threshold = threshold,
                 profileName = profileName,
@@ -154,7 +156,7 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // -------------------------------------------------------- Measurement
+    // --- Measurement
 
     /**
      * One window. A null [profileName] measures the device as it stands and keeps
@@ -215,16 +217,44 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             shell = sh
-            val m = withContext(Dispatchers.IO) { DeviceProbe.probe(sh) }
+            // A probe walks roughly nine hundred nodes on hardware nobody here
+            // has seen. One that throws inside viewModelScope takes the process
+            // with it, on every launch, with no way for the user out of it.
+            val m = withContext(Dispatchers.IO) { runCatching { DeviceProbe.probe(sh) } }
+                .getOrElse {
+                    _state.value = UiState.NoRoot(
+                        "Probing this kernel failed: ${it.message ?: it::class.simpleName}. " +
+                            "That is a bug in Governor, not in your phone."
+                    )
+                    return@launch
+                }
             model = m
             val live = withContext(Dispatchers.IO) { DeviceProbe.sampleLive(sh, m) }
             _state.value = UiState.Ready(m, live)
             captureAsFoundProfile(m)
             startLive()
-            viewModelScope.launch(Dispatchers.IO) {
+            capabilityJob?.cancel()
+            capabilityJob = viewModelScope.launch(Dispatchers.IO) {
                 _capabilities.value = Capabilities.report(sh, m)
             }
         }
+    }
+
+    /**
+     * Live sampling follows the UI, not the ViewModel.
+     *
+     * [viewModelScope] lives until the activity is finished, so without this the
+     * poll below carries on through the screen being off and the app sitting in
+     * Recents: a root round trip over a hundred sysfs nodes every two seconds,
+     * indefinitely, from the app that exists to find exactly that.
+     */
+    fun onUiStarted() {
+        if (model != null) startLive()
+    }
+
+    fun onUiStopped() {
+        liveJob?.cancel()
+        liveJob = null
     }
 
     private fun startLive() {
@@ -256,7 +286,7 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ------------------------------------------------------------- Writes
+    // --- Writes
 
     fun setPolicyFreq(policyId: Int, min: Long, max: Long) {
         val p = model?.policies?.firstOrNull { it.id == policyId } ?: return
@@ -311,6 +341,9 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setReadAhead(deviceName: String, kb: Long) =
         direct("/sys/block/$deviceName/queue/read_ahead_kb", kb.toString())
+
+    fun setNrRequests(deviceName: String, requests: Long) =
+        direct("/sys/block/$deviceName/queue/nr_requests", requests.toString())
 
     fun setVmTunable(name: String, value: String) = direct("/proc/sys/vm/$name", value)
 
@@ -404,12 +437,14 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
         if (current is UiState.Ready) _state.value = current.copy(lastRejection = null)
     }
 
-    // ------------------------------------------------------------ Plumbing
+    // --- Plumbing
 
     /** Re-probes and republishes, preserving whatever revert is in flight. */
     private suspend fun reload(rejection: String?) {
         val sh = shell ?: return
-        val m = DeviceProbe.probe(sh)
+        // Keep the last good model rather than crashing out of a write's
+        // coroutine: the write already happened either way.
+        val m = runCatching { DeviceProbe.probe(sh) }.getOrNull() ?: model ?: return
         model = m
         val previous = _state.value as? UiState.Ready
         _state.value = UiState.Ready(
@@ -439,13 +474,23 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun range(minKHz: Long, maxKHz: Long) = String.format(
-        java.util.Locale.US, "%.2f\u2013%.2f GHz", minKHz / 1_000_000.0, maxKHz / 1_000_000.0,
+        Locale.US, "%.2f\u2013%.2f GHz", minKHz / 1_000_000.0, maxKHz / 1_000_000.0,
     )
 
     override fun onCleared() {
         liveJob?.cancel()
         revertJob?.cancel()
+        capabilityJob?.cancel()
         super.onCleared()
+    }
+
+    /** Unique even for two adds inside the same millisecond. */
+    private fun nextTriggerId(): Long {
+        val now = System.currentTimeMillis()
+        val taken = _triggers.value.map { it.id }.toSet()
+        var id = now
+        while (id in taken) id++
+        return id
     }
 
     private companion object {

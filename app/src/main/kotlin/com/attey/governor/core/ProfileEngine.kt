@@ -107,8 +107,13 @@ object ProfileEngine {
         profile.io.forEach { (k, v) ->
             writes += "/sys/block/${k.substringBefore('/')}/queue/${k.substringAfter('/')}" to v
         }
+        // Same quoting rule as Writer.write, and for a harder reason: this script
+        // runs as uid 0 at every boot. A value carrying a quote would close the
+        // one below it and hand the rest of the line to the shell as commands.
+        // A profile that came off disk, or off another phone, is not trusted.
         for ((path, value) in writes) {
-            appendLine("[ -e $path ] && echo '$value' > $path")
+            if (value.any { it == '\'' || it == '\n' || it == '\r' }) continue
+            appendLine("[ -e '$path' ] && echo '$value' > '$path'")
         }
     }
 }

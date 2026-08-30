@@ -83,7 +83,7 @@ object Writer {
         Regex("^/sys/class/thermal/thermal_message/"),
     )
 
-    fun isDenied(path: String): Boolean = DENY.any { it.containsMatchIn(path) }
+    private fun isDenied(path: String): Boolean = DENY.any { it.containsMatchIn(path) }
 
     /**
      * Writes [value] to [path] and reads it back. sysfs frequently accepts a
@@ -97,7 +97,7 @@ object Writer {
         // the persistent shell waiting for input that never comes, hanging every
         // later command. Newlines split the command outright.
         if (value.any { it == '\'' || it == '\n' || it == '\r' }) {
-            return WriteResult.Refused("value contains a quote or newline")
+            return WriteResult.Refused("value contains a quote or a line break")
         }
         // No trailing whitespace: at least one kernel interface (cpu_boost's
         // input_boost_freq) rejects a value written with a trailing space and
@@ -105,7 +105,21 @@ object Writer {
         val v = value.trim()
         shell.exec("printf '%s' '$v' > '$path' 2>/dev/null")
         val back = shell.exec("cat '$path' 2>/dev/null").trim()
-        return if (back == v || back.split(Regex("\\s+")).contains(v)) WriteResult.Ok
-        else WriteResult.Rejected(v, back)
+        return if (accepted(back, v)) WriteResult.Ok else WriteResult.Rejected(v, back)
+    }
+
+    /**
+     * Whether the read-back means the write landed.
+     *
+     * Some nodes echo the value straight back. Some answer with the whole menu
+     * and brackets round the active entry -- `none [mq-deadline] kyber` -- so a
+     * plain token match calls a successful scheduler change a rejection, which
+     * is the worst answer available: the write worked and the app says it did
+     * not.
+     */
+    private fun accepted(back: String, wanted: String): Boolean {
+        if (back == wanted) return true
+        val tokens = back.split(Regex("\\s+")).map { it.trim('[', ']') }
+        return tokens.contains(wanted)
     }
 }

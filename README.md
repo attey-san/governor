@@ -17,19 +17,17 @@ Governor discovers everything at runtime and reads back after every write.
 
 ## What makes it different
 
-**It measures.** Apply a profile, and it samples real battery draw — `current_now ×
-voltage_now` — over a fixed window, diffs per-cluster residency from `time_in_state`, and
-compares against a stored baseline. A delta under 5% of baseline is reported as *"no
-measurable difference"* rather than as a win, because sampling noise on a phone is easily
-that large.
+Apply a profile and it samples real battery draw — `current_now × voltage_now` — over a
+fixed window, diffs per-cluster residency from `time_in_state`, and compares against a
+stored baseline. A delta under 5% of baseline is reported as *"no measurable difference"*
+rather than as a win, because sampling noise on a phone is easily that large.
 
-**It undoes itself.** Every change that could wedge a phone — a governor swap, an offlined
-core, a frequency ceiling — is applied with a 30-second countdown. Don't confirm, and it
-goes back. Desktop display settings have worked this way for twenty years.
+Every change that could wedge a phone — a governor swap, an offlined core, a frequency
+ceiling — is applied with a 30-second countdown. Don't confirm, and it goes back. Desktop
+display settings have worked this way for twenty years.
 
-**It tells you what your kernel has.** A browsable report of 78 known tunables against
-what this kernel actually exposes, with paths, and read-only marked separately from
-writable.
+And it will tell you what your kernel has: a browsable report of 79 known tunables against
+what this one actually exposes, with paths, and read-only marked separately from writable.
 
 ## What it deliberately does not do
 
@@ -68,7 +66,7 @@ separated from `dm-*`, `loop*` and `zram*`, and mount points are resolved throug
 | **GPU** | Frequency range, governor, busy percentage where exposed |
 | **Battery** | Live draw in mW, capacity against design, temperature |
 | **Thermal** | Every zone, read-only, unpopulated sensors labelled as such |
-| **I/O** | Scheduler, read-ahead and queue depth per real block device |
+| **I/O** | Scheduler, read-ahead and queue depth per real block device, virtual ones listed read-only |
 | **Memory** | vm tunables, zram, and a per-CPU input-boost editor |
 | **Profiles** | Named settings, applied by trigger, exportable as a Magisk module |
 | **Measure** | A/B battery draw with residency breakdown |
@@ -115,8 +113,15 @@ is newer than 21, point Gradle at a 21 in `~/.gradle/gradle.properties`:
 org.gradle.java.home=/path/to/jdk-21
 ```
 
-`assembleRelease` produces an unsigned APK — sign it with your own key, or use the debug
-build.
+`assembleRelease` produces an unsigned APK, which Android will not install as-is. Sign it
+with your own key:
+
+```sh
+apksigner sign --ks your.keystore --out governor.apk \
+  app/build/outputs/apk/release/app-release-unsigned.apk
+```
+
+Or just build and install the debug one, which is signed with the SDK's debug key.
 
 ## Notes from real hardware
 

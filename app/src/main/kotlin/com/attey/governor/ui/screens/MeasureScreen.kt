@@ -20,6 +20,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -38,6 +39,8 @@ import com.attey.governor.ui.components.Readout
 import com.attey.governor.ui.components.SectionCard
 import com.attey.governor.ui.components.ValueRow
 import com.attey.governor.ui.components.kHzToGHz
+import java.util.Locale
+import kotlin.math.roundToInt
 
 private const val BASELINE = "baseline (current settings)"
 
@@ -52,7 +55,7 @@ fun MeasureScreen(
     onStop: () -> Unit,
 ) {
     var target by remember { mutableStateOf(BASELINE) }
-    var minutes by remember { mutableStateOf(5) }
+    var minutes by remember { mutableIntStateOf(5) }
     val running = run?.running == true
 
     LazyColumn(
@@ -245,7 +248,7 @@ private fun ResidencyRow(freq: Long, share: Float) {
             )
         }
         Text(
-            text = "${(share * 100).toInt()}%",
+            text = "${(share * 100).roundToInt()}%",
             modifier = Modifier.width(48.dp).padding(start = 8.dp),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -253,4 +256,5 @@ private fun ResidencyRow(freq: Long, share: Float) {
     }
 }
 
-private fun clock(seconds: Int) = "%d:%02d".format(seconds / 60, seconds % 60)
+private fun clock(seconds: Int) =
+    String.format(Locale.US, "%d:%02d", seconds / 60, seconds % 60)

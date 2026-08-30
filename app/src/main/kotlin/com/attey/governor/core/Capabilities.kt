@@ -23,7 +23,7 @@ object Capabilities {
     )
 
     private val KINDS = listOf(
-        // ---- CPU frequency
+        // --- CPU frequency
         Kind("CPU", "scaling min", "{policy}/scaling_min_freq"),
         Kind("CPU", "scaling max", "{policy}/scaling_max_freq"),
         Kind("CPU", "governor", "{policy}/scaling_governor"),
@@ -40,7 +40,7 @@ object Capabilities {
         Kind("CPU", "core_ctl busy down", "{policy}/core_ctl/busy_down_thres"),
         Kind("CPU", "core_ctl offline delay", "{policy}/core_ctl/offline_delay_ms"),
 
-        // ---- Governor tunables. schedutil and interactive are the two that ship.
+        // --- Governor tunables. schedutil and interactive are the two that ship.
         Kind("Governor", "up rate limit", "{gov}/up_rate_limit_us"),
         Kind("Governor", "down rate limit", "{gov}/down_rate_limit_us"),
         Kind("Governor", "hispeed freq", "{gov}/hispeed_freq"),
@@ -54,7 +54,7 @@ object Capabilities {
         Kind("Governor", "timer rate", "{gov}/timer_rate"),
         Kind("Governor", "boostpulse", "{gov}/boostpulse"),
 
-        // ---- Input boost
+        // --- Input boost
         Kind(
             "Boost", "input boost freq", "{boost}/input_boost_freq",
             "per-cpu pairs, not a scalar: \"0:1344000 1:0 ...\". Writing a bare number silently boosts cpu0 only.",
@@ -62,7 +62,7 @@ object Capabilities {
         Kind("Boost", "input boost duration", "{boost}/input_boost_ms"),
         Kind("Boost", "sched boost on input", "{boost}/sched_boost_on_input"),
 
-        // ---- GPU
+        // --- GPU
         Kind("GPU", "min frequency", "{gpu}/min_freq"),
         Kind("GPU", "max frequency", "{gpu}/max_freq"),
         Kind("GPU", "governor", "{gpu}/governor"),
@@ -77,7 +77,7 @@ object Capabilities {
         Kind("GPU", "force bus on", "/sys/class/kgsl/kgsl-3d0/force_bus_on"),
         Kind("GPU", "idle timer", "/sys/class/kgsl/kgsl-3d0/idle_timer"),
 
-        // ---- Battery
+        // --- Battery
         Kind("Battery", "current", "{bat}/current_now"),
         Kind("Battery", "voltage", "{bat}/voltage_now"),
         Kind("Battery", "capacity now", "{bat}/charge_full"),
@@ -90,7 +90,7 @@ object Capabilities {
         Kind("Battery", "input suspend", "{bat}/input_suspend"),
         Kind("Battery", "charge current limit", "{bat}/constant_charge_current_max"),
 
-        // ---- I/O
+        // --- I/O
         Kind("I/O", "scheduler", "{blk}/queue/scheduler"),
         Kind(
             "I/O", "read ahead", "{blk}/queue/read_ahead_kb",
@@ -103,7 +103,7 @@ object Capabilities {
         Kind("I/O", "merge policy", "{blk}/queue/nomerges"),
         Kind("I/O", "rotational flag", "{blk}/queue/rotational"),
 
-        // ---- Memory
+        // --- Memory
         Kind(
             "Memory", "swappiness", "/proc/sys/vm/swappiness",
             "measured null on the development device: no effect on launch times or page faults.",
@@ -124,7 +124,7 @@ object Capabilities {
         Kind("Memory", "zram algorithm", "/sys/block/zram0/comp_algorithm"),
         Kind("Memory", "zram streams", "/sys/block/zram0/max_comp_streams"),
 
-        // ---- Thermal, read-only on purpose
+        // --- Thermal, read-only on purpose
         Kind("Thermal", "zone temperature", "/sys/class/thermal/thermal_zone0/temp"),
         Kind(
             "Thermal", "cooling state", "/sys/class/thermal/cooling_device0/cur_state",
@@ -143,30 +143,42 @@ object Capabilities {
         val policy = model.policies.firstOrNull()
         val gpu = model.gpus.firstOrNull()
         val blk = model.blockDevices.firstOrNull { !it.isVirtual }
-        val boostDir = model.boost.values.firstOrNull()?.path?.substringBeforeLast('/')
+        // The directory holding input_boost_freq, not the parent of whichever
+        // node happened to sort first -- probeBoost merges two candidate
+        // directories into one map keyed by bare filename.
+        val boostDir = (model.boost["input_boost_freq"] ?: model.boost.values.firstOrNull())
+            ?.path?.substringBeforeLast('/')
 
+        val anchors = mapOf(
+            "{policy}" to policy?.path,
+            "{gov}" to policy?.takeIf { it.governor.isNotEmpty() }?.let { "${it.path}/${it.governor}" },
+            "{gpu}" to gpu?.path,
+            "{bat}" to model.battery?.path,
+            "{blk}" to blk?.path,
+            "{boost}" to boostDir,
+        )
+        // A kind whose anchor this device does not have resolves to nothing at
+        // all, rather than to the tail of its own template. Substituting an empty
+        // string would leave "{gpu}/min_freq" as "/min_freq" -- a path that gets
+        // probed, comes back absent, and is then printed in the report as though
+        // it were where the GPU lives.
         val resolved = KINDS.map { k ->
-            val p = k.template
-                .replace("{policy}", policy?.path ?: "")
-                .replace("{gov}", policy?.let { "${it.path}/${it.governor}" } ?: "")
-                .replace("{gpu}", gpu?.path ?: "")
-                .replace("{bat}", model.battery?.path ?: "")
-                .replace("{blk}", blk?.path ?: "")
-                .replace("{boost}", boostDir ?: "")
-            k to p
+            val missing = anchors.any { (token, value) ->
+                value == null && k.template.contains(token)
+            }
+            val path = if (missing) null else anchors.entries.fold(k.template) { acc, (token, value) ->
+                if (value == null) acc else acc.replace(token, value)
+            }
+            k to path
         }
-        // A kind whose anchor is missing entirely (no GPU, no battery) resolves to
-        // a path starting with "/" only by accident; treat it as absent rather
-        // than probing a nonsense path.
-        val probable = resolved.filter { (_, p) -> p.startsWith("/") && !p.contains("//") }
-        val nodes = SysNode.probe(shell, probable.map { it.second }.distinct())
+        val nodes = SysNode.probe(shell, resolved.mapNotNull { it.second }.distinct())
 
         return resolved.map { (k, p) ->
-            val node = nodes[p]
+            val node = p?.let { nodes[it] }
             Capability(
                 area = k.area,
                 name = k.name,
-                path = p.ifEmpty { k.template },
+                path = p ?: k.template,
                 present = node?.exists == true,
                 writable = node?.writable == true,
                 note = k.note,

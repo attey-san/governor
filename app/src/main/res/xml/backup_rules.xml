@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Nothing leaves the device. A profile is a set of absolute sysfs paths and
+  frequency numbers belonging to one SoC; restoring it onto a different phone
+  would apply another device's settings, or write to nodes that are not there.
+-->
+<full-backup-content>
+    <exclude domain="root" />
+    <exclude domain="file" />
+    <exclude domain="sharedpref" />
+    <exclude domain="database" />
+    <exclude domain="external" />
+</full-backup-content>

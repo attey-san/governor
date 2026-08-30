@@ -63,7 +63,12 @@ data class PendingRevert(
     val secondsLeft: Int,
     /** path -> value to restore if the user does not confirm. */
     val restore: Map<String, String>,
-)
+    /** The countdown this started from, so the bar does not carry its own copy. */
+    val totalSeconds: Int = secondsLeft,
+) {
+    val fractionLeft: Float get() =
+        if (totalSeconds <= 0) 0f else secondsLeft.toFloat() / totalSeconds
+}
 
 /** One line of the capability report. */
 data class Capability(

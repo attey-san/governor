@@ -76,28 +76,26 @@ private fun CapabilityRow(cap: Capability) {
             !cap.writable -> MaterialTheme.colorScheme.tertiary
             else -> MaterialTheme.colorScheme.primary
         }
-        Box(modifier = Modifier.weight(1f)) {
-            Column {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = cap.name,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (cap.present) MaterialTheme.colorScheme.onSurface
+                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+            )
+            Text(
+                text = cap.path,
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 1.dp),
+            )
+            if (cap.note != null) {
                 Text(
-                    text = cap.name,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (cap.present) MaterialTheme.colorScheme.onSurface
-                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                )
-                Text(
-                    text = cap.path,
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    text = cap.note,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 1.dp),
                 )
-                if (cap.note != null) {
-                    Text(
-                        text = cap.note,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 1.dp),
-                    )
-                }
             }
         }
         Text(

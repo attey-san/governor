@@ -4,12 +4,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -21,6 +22,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -95,8 +97,8 @@ private fun CpuPolicyCard(
                 caption = policy.governor,
             )
         }
-        var min by remember(policy.scalingMin) { mutableStateOf(policy.scalingMin) }
-        var max by remember(policy.scalingMax) { mutableStateOf(policy.scalingMax) }
+        var min by remember(policy.scalingMin) { mutableLongStateOf(policy.scalingMin) }
+        var max by remember(policy.scalingMax) { mutableLongStateOf(policy.scalingMax) }
         FreqSlider(
             label = "min",
             steps = policy.availableFreqs,
@@ -169,10 +171,7 @@ private fun TunablesSection(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
         )
-        Text(
-            modifier = Modifier.weight(1f),
-            text = "",
-        )
+        Spacer(modifier = Modifier.weight(1f))
         IconButton(onClick = { expanded = !expanded }) {
             Icon(
                 imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
@@ -278,9 +277,7 @@ private fun CoresSection(
                     // Read the node, do not assume. A core offlined by the vendor's
                     // core_ctl, or by this app before a restart, is still offline.
                     checked = online[cpu] ?: true,
-                    onCheckedChange = { on ->
-                        if (canOffline) onSetCoreOnline(cpu, on)
-                    },
+                    onCheckedChange = { on -> onSetCoreOnline(cpu, on) },
                     enabled = canOffline,
                 )
             }
