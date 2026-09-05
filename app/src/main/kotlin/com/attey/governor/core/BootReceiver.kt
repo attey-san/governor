@@ -4,18 +4,11 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 
-/**
- * Brings the trigger watcher back after a reboot.
- *
- * This is not how a profile survives a reboot -- that is the generated Magisk
- * module, which runs late enough to beat vendor init. This only restarts the
- * watcher so that *future* triggers still fire.
- */
+/** Restarts the trigger watcher after boot. */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
-        // A reboot resets live kernel state, so a pre-app snapshot from the old
-        // boot must never be restored over it.
+        // Never restore a pre-app snapshot from the previous boot.
         ProfileStore(context).clearAppOverride()
         TriggerService.sync(context)
     }

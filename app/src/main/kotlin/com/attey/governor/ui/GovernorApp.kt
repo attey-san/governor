@@ -66,7 +66,6 @@ private val TABS = listOf(
 @Composable
 fun GovernorApp(vm: GovernorViewModel = viewModel()) {
     val state by vm.state.collectAsState()
-    // Sampling stops with the UI. See GovernorViewModel.onUiStarted.
     LifecycleStartEffect(vm) {
         vm.onUiStarted()
         onStopOrDispose { vm.onUiStopped() }
@@ -120,8 +119,7 @@ private fun ReadyScaffold(state: UiState.Ready, vm: GovernorViewModel) {
     val hasUsageAccess by vm.hasUsageAccess.collectAsState()
     val context = LocalContext.current
 
-    // The usage-access appop is granted in Settings, so the only way to notice it
-    // happened is to look again when this tab comes back into view.
+    // Usage access is granted outside the app, so recheck on tab changes.
     LaunchedEffect(selected) { vm.recheckUsageAccess() }
 
     val rejection = state.lastRejection
@@ -259,13 +257,6 @@ private fun ReadyScaffold(state: UiState.Ready, vm: GovernorViewModel) {
     }
 }
 
-/**
- * The countdown bar.
- *
- * Not a snackbar and not dismissible by tapping elsewhere: it is the only thing
- * standing between a bad governor and a phone that needs the power button held
- * for ten seconds.
- */
 @Composable
 private fun PendingBar(pending: PendingRevert, onConfirm: () -> Unit, onRevert: () -> Unit) {
     Surface(

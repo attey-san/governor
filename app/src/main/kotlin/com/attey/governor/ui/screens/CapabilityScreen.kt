@@ -32,8 +32,6 @@ fun CapabilityScreen(capabilities: List<Capability>) {
         item {
             SectionCard(title = "summary") {
                 Text(
-                    // Before the probe returns this list is empty, and "0 of 0"
-                    // reads like a finding rather than a blank page.
                     text = if (total == 0) "probing"
                     else "this kernel exposes $present of $total known tunables",
                     style = MaterialTheme.typography.bodyMedium,

@@ -28,19 +28,11 @@ import com.attey.governor.ui.components.Readout
 import com.attey.governor.ui.components.SectionCard
 import java.util.Locale
 
-/**
- * Thermal, read-only and deliberately so.
- *
- * The vendor's thermal governor is a working closed loop that re-parks any
- * change within seconds; fighting it is futile and the failure mode is a hot
- * phone. So this is telemetry, and it says why.
- */
 @Composable
 fun ThermalScreen(zones: List<ThermalZone>, live: LiveStats) {
     var showAll by remember { mutableStateOf(false) }
 
-    // Prefer the live reading; fall back to what the probe saw so the list is
-    // never blank on the first frame.
+    // Use probe-time values until the first live sample arrives.
     val readings = zones.mapNotNull { z ->
         val t = live.zoneTemps[z.id] ?: z.celsius.takeIf { z.isPopulated }
         if (t == null) null else z to t
@@ -72,9 +64,8 @@ fun ThermalScreen(zones: List<ThermalZone>, live: LiveStats) {
                 }
                 Text(
                     "Read-only. A userspace thermal governor re-parks any change within " +
-                        "seconds, so an app that offered these as sliders would be lying " +
-                        "about what it can do — and a phone that lost that argument would " +
-                        "run hot.",
+                        "seconds; overriding it can leave the device without effective " +
+                        "thermal control.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -118,8 +109,6 @@ private fun ZoneRow(zone: ThermalZone, temp: Float) {
                 .height(8.dp)
                 .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(3.dp))
         ) {
-            // 20 C to 100 C: below room temperature the bar would be noise, and
-            // above 100 the phone has other problems.
             val share = ((temp - 20f) / 80f).coerceIn(0f, 1f)
             Box(
                 modifier = Modifier

@@ -19,20 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 
-/**
- * A fixed palette, not Material You.
- *
- * Dynamic colour derives from the wallpaper, and on the development phone -- a
- * black and white wallpaper -- it produced an entirely greyscale app in which
- * nothing could be distinguished from anything else. A tool that uses colour to
- * mean something ("this is capped", "the kernel refused this") cannot let the
- * wallpaper decide whether colour exists.
- *
- * Colour here carries meaning:
- *   primary   -- live, active, yours
- *   tertiary  -- something is being held down by the system, not by you
- *   error     -- the kernel refused, or the phone is hot
- */
+// Fixed palette: status colors must not depend on the wallpaper.
 private val Mint = Color(0xFF5FD3B4)
 private val MintDim = Color(0xFF1E3B36)
 private val Amber = Color(0xFFFFC46B)
@@ -60,9 +47,7 @@ private val Dark = darkColorScheme(
     onSurfaceVariant = Color(0xFF9BA5AE),
     outline = Color(0xFF3A424A),
     outlineVariant = Color(0xFF262C32),
-    // Material's own defaults for these are violet, and they leak into controls
-    // that never name a colour -- the slider's inactive track was arriving purple
-    // in an otherwise teal app.
+    // Override Material's violet container defaults.
     secondaryContainer = Color(0xFF1B2735),
     onSecondaryContainer = Color(0xFF8FB6FF),
     surfaceContainerLowest = Color(0xFF06080A),
@@ -93,8 +78,7 @@ private val Light = lightColorScheme(
     surfaceVariant = Color(0xFFE6EBEE),
     onSurfaceVariant = Color(0xFF4B555D),
     outline = Color(0xFFA8B2B9),
-    // The same violet leak as above: a light scheme that names no container
-    // colours gets Material's, and the slider track goes purple here too.
+    // Override Material's violet container defaults.
     secondaryContainer = Color(0xFFD8E4F7),
     onSecondaryContainer = Color(0xFF15305C),
     surfaceContainerLowest = Color(0xFFFFFFFF),
@@ -105,15 +89,7 @@ private val Light = lightColorScheme(
     surfaceTint = Color(0xFF00695C),
 )
 
-/**
- * Live numbers use tabular figures, not a monospace face.
- *
- * The problem being solved is a readout that jiggles as digits change width.
- * Monospace fixes that and costs legibility -- "1.17" arrives with a full
- * character cell around the decimal point. The `tnum` OpenType feature gives
- * fixed-width digits in the normal face, which is the same guarantee without the
- * gaps. Monospace is kept for paths, where it means "this is a literal string".
- */
+// Tabular figures keep live readouts stable without using monospace body text.
 private val GovernorTypography = Typography().let { base ->
     base.copy(
         headlineMedium = base.headlineMedium.copy(
@@ -142,9 +118,7 @@ fun GovernorTheme(content: @Composable () -> Unit) {
         }
     }
     MaterialTheme(colorScheme = scheme, typography = GovernorTypography) {
-        // Without this the activity shows the platform window background until the
-        // first Surface draws -- which, during a root probe, is several seconds of
-        // mid-grey with dark-grey text on it.
+        // Paint the window immediately while the initial root probe runs.
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = scheme.background,

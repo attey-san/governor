@@ -2,20 +2,11 @@ package com.attey.governor.core
 
 import kotlinx.coroutines.sync.withLock
 
-/**
- * Turns a [Profile] into writes, and the current device state back into a Profile.
- */
 object ProfileEngine {
 
     /**
-     * Applies [profile], returning the settings the kernel declined.
-     *
-     * Ordering matters twice. Frequency windows are widened before they are
-     * narrowed, because the kernel silently clamps a min written above the
-     * current max. And the governor is set *before* its tunables, since the
-     * tunable directory only exists while that governor is loaded -- writing
-     * them in the other order puts the values into the previous governor's
-     * directory, where they sit looking correct and doing nothing.
+     * Applies [profile] and returns rejected settings. Governors are written
+     * before their tunables; frequency windows are widened before narrowing.
      */
     suspend fun apply(shell: RootShell, model: DeviceModel, profile: Profile): List<String> =
         kernelWriteMutex.withLock {
@@ -56,13 +47,7 @@ object ProfileEngine {
             rejections.values.toList()
         }
 
-    /**
-     * The current state as a profile.
-     *
-     * Only captures what a profile is allowed to restore. vm and I/O are left out:
-     * snapshotting every visible knob would make every profile a whole-system
-     * image and stamp over settings the user never chose to include.
-     */
+    /** Captures only settings a profile is allowed to restore. */
     fun snapshot(model: DeviceModel, name: String) = Profile(
         name = name,
         policyMin = model.policies.associate { it.id to it.scalingMin },
@@ -76,11 +61,7 @@ object ProfileEngine {
         ).filter { it.isUsable }.associate { it.path to it.value },
     )
 
-    /**
-     * The shell lines this profile becomes, for a boot script. Same ordering as
-     * [apply], and every write is guarded by the node existing, because a module
-     * runs on a phone that may have been reflashed since.
-     */
+    /** Builds the guarded write lines used by generated boot modules. */
     fun toShellScript(model: DeviceModel, profile: Profile): String = buildString {
         val writes = mutableListOf<Pair<String, String>>()
         for (policy in model.policies) {
@@ -102,8 +83,7 @@ object ProfileEngine {
             )
         }
         profile.tunables.forEach { (p, v) -> writes += p to v }
-        // This script runs as uid 0 at every boot. Treat a profile loaded from
-        // disk as untrusted and use the same allowlist and quoting as live writes.
+        // Use the live-write allowlist and quoting for stored profiles too.
         for ((path, value) in writes) appendLine(
             requireNotNull(Writer.shellWriteLine(path, value)) {
                 "unsafe profile setting: $path"
@@ -111,11 +91,7 @@ object ProfileEngine {
         )
     }
 
-    /**
-     * A max/min/max sequence reaches any valid window regardless of the current
-     * one. The first max widens an upper bound when needed; if it is below the
-     * current minimum it may be clamped, then succeeds after the minimum moves.
-     */
+    /** max/min/max reaches a valid window from either side of the old bounds. */
     internal fun frequencyWindowWrites(
         minPath: String,
         maxPath: String,

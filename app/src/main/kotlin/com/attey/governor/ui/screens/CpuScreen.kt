@@ -125,10 +125,6 @@ private fun CpuPolicyCard(
         )
         if (policy.isCappedBelowHardware) {
             Text(
-                // Careful with the claim here: the app cannot tell its own cap
-                // from the vendor thermal daemon's, and asserting "something else
-                // did this" right after the user did it would be a lie in an app
-                // whose whole argument is that it does not tell you any.
                 text = "ceiling ${policy.scalingMax.kHzToGHz()}, silicon goes to " +
                     "${policy.hwMax.kHzToGHz()}. If you did not set this, something else did.",
                 style = MaterialTheme.typography.bodySmall,
@@ -220,9 +216,6 @@ private fun TunableRow(
             OutlinedTextField(
                 value = text,
                 onValueChange = { text = it },
-                // Committing per keystroke sends a root write and a full re-probe for
-                // every character: typing "1200000" wrote 1, 12, 120 ... to a live
-                // governor tunable. Wait for the keyboard's done action.
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { onSetTunable(node.path, text.trim()) }),
                 modifier = Modifier
@@ -279,8 +272,6 @@ private fun CoresSection(
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                 )
                 Switch(
-                    // Read the node, do not assume. A core offlined by the vendor's
-                    // core_ctl, or by this app before a restart, is still offline.
                     checked = online[cpu] ?: true,
                     onCheckedChange = { on -> onSetCoreOnline(cpu, on) },
                     enabled = canOffline,

@@ -1,18 +1,6 @@
 package com.attey.governor.core
 
-/**
- * The capability report: what this kernel exposes, out of what is known to exist.
- *
- * The denominator is a fixed list of tunable *kinds*, not of paths. Counting
- * paths would make the number scale with the number of CPU clusters and block
- * devices, so two phones could not be compared -- which is the only reason to
- * show a number at all. One representative instance is probed per kind.
- *
- * Notes attached below are measurements, not opinions. Where a node exists but
- * did nothing on real hardware, it says so, because a kernel manager that
- * presents forty knobs as equally meaningful is how this app category earned its
- * reputation.
- */
+/** Reports one representative node for each known tunable kind. */
 object Capabilities {
 
     private class Kind(
@@ -23,7 +11,7 @@ object Capabilities {
     )
 
     private val KINDS = listOf(
-        // --- CPU frequency
+        // CPU frequency
         Kind("CPU", "scaling min", "{policy}/scaling_min_freq"),
         Kind("CPU", "scaling max", "{policy}/scaling_max_freq"),
         Kind("CPU", "governor", "{policy}/scaling_governor"),
@@ -40,7 +28,7 @@ object Capabilities {
         Kind("CPU", "core_ctl busy down", "{policy}/core_ctl/busy_down_thres"),
         Kind("CPU", "core_ctl offline delay", "{policy}/core_ctl/offline_delay_ms"),
 
-        // --- Governor tunables. schedutil and interactive are the two that ship.
+        // Governor tunables
         Kind("Governor", "up rate limit", "{gov}/up_rate_limit_us"),
         Kind("Governor", "down rate limit", "{gov}/down_rate_limit_us"),
         Kind("Governor", "hispeed freq", "{gov}/hispeed_freq"),
@@ -54,7 +42,7 @@ object Capabilities {
         Kind("Governor", "timer rate", "{gov}/timer_rate"),
         Kind("Governor", "boostpulse", "{gov}/boostpulse"),
 
-        // --- Input boost
+        // Input boost
         Kind(
             "Boost", "input boost freq", "{boost}/input_boost_freq",
             "per-cpu pairs, not a scalar: \"0:1344000 1:0 ...\". Writing a bare number silently boosts cpu0 only.",
@@ -62,7 +50,7 @@ object Capabilities {
         Kind("Boost", "input boost duration", "{boost}/input_boost_ms"),
         Kind("Boost", "sched boost on input", "{boost}/sched_boost_on_input"),
 
-        // --- GPU
+        // GPU
         Kind("GPU", "min frequency", "{gpu}/min_freq"),
         Kind("GPU", "max frequency", "{gpu}/max_freq"),
         Kind("GPU", "governor", "{gpu}/governor"),
@@ -77,7 +65,7 @@ object Capabilities {
         Kind("GPU", "force bus on", "/sys/class/kgsl/kgsl-3d0/force_bus_on"),
         Kind("GPU", "idle timer", "/sys/class/kgsl/kgsl-3d0/idle_timer"),
 
-        // --- Battery
+        // Battery
         Kind("Battery", "current", "{bat}/current_now"),
         Kind("Battery", "voltage", "{bat}/voltage_now"),
         Kind("Battery", "capacity now", "{bat}/charge_full"),
@@ -90,7 +78,7 @@ object Capabilities {
         Kind("Battery", "input suspend", "{bat}/input_suspend"),
         Kind("Battery", "charge current limit", "{bat}/constant_charge_current_max"),
 
-        // --- I/O
+        // I/O
         Kind("I/O", "scheduler", "{blk}/queue/scheduler"),
         Kind(
             "I/O", "read ahead", "{blk}/queue/read_ahead_kb",
@@ -103,7 +91,7 @@ object Capabilities {
         Kind("I/O", "merge policy", "{blk}/queue/nomerges"),
         Kind("I/O", "rotational flag", "{blk}/queue/rotational"),
 
-        // --- Memory
+        // Memory
         Kind(
             "Memory", "swappiness", "/proc/sys/vm/swappiness",
             "measured null on the development device: no effect on launch times or page faults.",
@@ -124,7 +112,7 @@ object Capabilities {
         Kind("Memory", "zram algorithm", "/sys/block/zram0/comp_algorithm"),
         Kind("Memory", "zram streams", "/sys/block/zram0/max_comp_streams"),
 
-        // --- Thermal, read-only on purpose
+        // Thermal (read-only)
         Kind("Thermal", "zone temperature", "/sys/class/thermal/thermal_zone0/temp"),
         Kind(
             "Thermal", "cooling state", "/sys/class/thermal/cooling_device0/cur_state",
@@ -135,17 +123,11 @@ object Capabilities {
 
     val total: Int get() = KINDS.size
 
-    /**
-     * Resolves every kind against this device and probes the ones whose path is
-     * not already known. One round trip.
-     */
     fun report(shell: RootShell, model: DeviceModel): List<Capability> {
         val policy = model.policies.firstOrNull()
         val gpu = model.gpus.firstOrNull()
         val blk = model.blockDevices.firstOrNull { !it.isVirtual }
-        // The directory holding input_boost_freq, not the parent of whichever
-        // node happened to sort first -- probeBoost merges two candidate
-        // directories into one map keyed by bare filename.
+        // probeBoost merges two candidate directories, so anchor from a node path.
         val boostDir = (model.boost["input_boost_freq"] ?: model.boost.values.firstOrNull())
             ?.path?.substringBeforeLast('/')
 
@@ -157,11 +139,7 @@ object Capabilities {
             "{blk}" to blk?.path,
             "{boost}" to boostDir,
         )
-        // A kind whose anchor this device does not have resolves to nothing at
-        // all, rather than to the tail of its own template. Substituting an empty
-        // string would leave "{gpu}/min_freq" as "/min_freq" -- a path that gets
-        // probed, comes back absent, and is then printed in the report as though
-        // it were where the GPU lives.
+        // Leave templates unresolved when the device has no matching subsystem.
         val resolved = KINDS.map { k ->
             val missing = anchors.any { (token, value) ->
                 value == null && k.template.contains(token)

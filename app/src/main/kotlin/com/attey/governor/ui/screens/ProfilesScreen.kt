@@ -169,8 +169,7 @@ private fun TriggersCard(
 
     val names = profiles.map { it.name }
     val appOptions = apps.associateBy { "${it.label} · ${it.packageName}" }
-    // Writing state during composition schedules another composition, which
-    // writes again. Fall back to the first profile when reading instead.
+    // Do not repair selection by writing Compose state during composition.
     val target = chosen?.takeIf { it in names } ?: names.firstOrNull().orEmpty()
 
     SectionCard(title = "triggers", subtitle = "the phone applies these on its own") {

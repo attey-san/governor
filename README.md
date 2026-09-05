@@ -7,11 +7,9 @@ A kernel manager for rooted Android that tells you whether anything actually hap
   <img src="docs/capability.png" width="45%" alt="Capability report" />
 </p>
 
-Every app in this category does the same two things wrong. They **hardcode paths** —
-`cpu0`, `cpu4`, `cpu7`, fixed frequency tables, fixed tunable names — which is why they
-break on each new SoC and why half the sliders on any given phone do nothing. And they
-**never report back**: forty toggles, no measurement, no feedback, so the whole category
-runs on folklore.
+Kernel managers often assume fixed CPU indices, frequency tables, and tunable names. Those
+assumptions break across SoCs. They also tend to stop at writing a value, without checking
+what the kernel accepted or measuring whether the change helped.
 
 Governor discovers everything at runtime and reads back after every write.
 
@@ -22,25 +20,22 @@ fixed window, diffs per-cluster residency from `time_in_state`, and compares aga
 stored baseline. A delta under 5% of baseline is reported as *"no measurable difference"*
 rather than as a win, because sampling noise on a phone is easily that large.
 
-Every change that could wedge a phone — a governor swap, an offlined core, a frequency
-ceiling — is applied with a 30-second countdown. Don't confirm, and it goes back. Desktop
-display settings have worked this way for twenty years. The rollback is owned by a detached
-root process, so it still runs if Governor is closed or Android kills its process.
+Changes that can destabilize a phone — a governor swap, an offlined core, a frequency
+ceiling — get a 30-second confirmation window. The rollback is owned by a detached root
+process, so it still runs if Governor is closed or Android kills its process.
 
-And it will tell you what your kernel has: a browsable report of 79 known tunables against
-what this one actually exposes, with paths, and read-only marked separately from writable.
+The capability report compares 79 known tunables with what the current kernel exposes,
+including paths and read-only status.
 
-## What it deliberately does not do
+## Scope
 
-- **No one-tap "Optimize".** It does nothing and everyone knows it.
-- **No thermal writes.** Thermal is exposed as telemetry only. The vendor's thermal
-  governor is a working closed loop that re-parks any change within seconds; an app that
-  offered those as sliders would be lying about what it can do, and a phone that lost that
-  argument runs hot.
+- **No one-tap "Optimize" preset.** Useful values depend on the device and workload.
+- **No thermal writes.** Thermal is telemetry only. Vendor thermal control is a closed
+  loop that overwrites manual changes, and bypassing it can leave the phone running hot.
 - **No overclock claims.** `cpuinfo_max_freq` is a hard ceiling. Raising it needs a custom
   kernel, not an app.
-- **No hardcoded "recommended" values.** Where a tunable was measured to do nothing on real
-  hardware, the capability report says so instead of presenting it as meaningful.
+- **No hardcoded "recommended" values.** Tunables measured to have no effect are labelled
+  in the capability report.
 
 ## How the portability works
 
@@ -48,11 +43,10 @@ what this one actually exposes, with paths, and read-only marked separately from
 /sys/devices/system/cpu/cpufreq/policy*/related_cpus
 ```
 
-Enumerating that gives cluster topology on any SoC — 4+4, 4+3+1, 2+4+2, whatever ships
-next — with nothing hardcoded. Governor tunables are found by listing
-`policyN/<current governor>/`, so schedutil, interactive and anything future work the same
-way. If a node is not there, the control is disabled with the reason shown, and the app
-does not crash.
+Enumerating that gives cluster topology on any SoC — 4+4, 4+3+1, 2+4+2 — without fixed
+core indices. Governor tunables are found by listing `policyN/<current governor>/`, so the
+same probe works with schedutil, interactive, and vendor-specific governors. If a node is
+absent, its control is disabled with the reason shown.
 
 The same idea runs through the rest: the GPU is found by filtering the devfreq class (a
 phone has around twenty devfreq devices and exactly one of them is the GPU); real disks are
@@ -81,8 +75,7 @@ settings edit screen.
 
 Profiles apply themselves on unplug, plug in, screen off, screen on, battery below a
 percentage, battery temperature above a threshold, or while a chosen app is open. The app
-trigger restores whatever was in effect before you opened that app when you leave it, so a
-game profile cannot quietly stay on all day.
+trigger restores whatever was in effect before you opened that app when you leave it.
 
 Nothing is polled unless an app trigger exists, and then only while the screen is on.
 

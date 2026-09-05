@@ -8,29 +8,16 @@ import java.io.File
 internal data class AppOverrideState(
     val packageName: String,
     val restore: Profile,
-    /** False while the restore point is durable but the app profile may be only partly applied. */
     val applied: Boolean,
 )
 
-/**
- * Profiles and triggers on disk, as JSON in the app's own files directory.
- *
- * No database and no serialization library: two flat lists that a person can
- * read with `cat` when something goes wrong on a phone they cannot debug.
- */
+/** JSON-backed profile and trigger storage. */
 class ProfileStore(context: Context) {
 
     private val profileFile = File(context.filesDir, "profiles.json")
     private val triggerFile = File(context.filesDir, "triggers.json")
     private val appOverrideFile = File(context.filesDir, "app-override.json")
 
-    /**
-     * Which profile the quick-settings tile last applied.
-     *
-     * A plain file rather than SharedPreferences: the tile service and the app run
-     * in the same process here, but a one-line file is readable with `cat` on a
-     * phone that is misbehaving, and the rest of this app's state already is.
-     */
     private val activeFile = File(context.filesDir, "active-profile")
 
     fun loadProfiles(): List<Profile> = read(profileFile) { toProfile(it) }
@@ -49,7 +36,6 @@ class ProfileStore(context: Context) {
 
     fun clearActiveProfile(): Boolean = clearAtomicallyWrittenFile(activeFile)
 
-    /** The pre-app snapshot must survive a foreground-service process restart. */
     internal fun loadAppOverride(): AppOverrideState? {
         val source = readableFile(appOverrideFile) ?: return null
         return runCatching {
@@ -89,15 +75,8 @@ class ProfileStore(context: Context) {
         }.getOrDefault(emptyList())
     }
 
-    /**
-     * Written to a sibling and renamed over the target.
-     *
-     * `writeText` truncates before it writes, so a process death in that window
-     * leaves an empty file -- and [read] treats an unparseable file as an empty
-     * list, which means every saved profile disappears without a word. A rename
-     * inside one directory is atomic, so the file is either the old one or the
-     * new one.
-     */
+    // State files are replaced by rename so a process death cannot leave a
+    // truncated JSON document.
     private fun write(file: File, objects: List<JSONObject>): Boolean {
         val array = JSONArray()
         objects.forEach { array.put(it) }
@@ -113,7 +92,7 @@ class ProfileStore(context: Context) {
             }.isSuccess
         }
 
-    /** A crash before rename leaves a complete temp file, which is still usable. */
+    // Recover a complete temp file left before rename.
     private fun readableFile(file: File): File? = synchronized(FILE_WRITE_LOCK) {
         val tmp = pendingFile(file)
         if (!file.exists() && tmp.exists()) runCatching { tmp.renameTo(file) }
@@ -128,7 +107,7 @@ class ProfileStore(context: Context) {
 
     private fun pendingFile(file: File) = File(file.parentFile, "${file.name}.tmp")
 
-    // --- Mapping
+    // JSON mapping
 
     private fun Profile.toJson() = JSONObject().apply {
         put("name", name)
@@ -167,8 +146,7 @@ class ProfileStore(context: Context) {
     }
 
     private fun toTrigger(o: JSONObject): Trigger? {
-        // An unknown type means a profile written by a newer build. Drop the row
-        // rather than crashing the whole list on one bad entry.
+        // Ignore trigger types written by newer versions.
         val type = runCatching { TriggerType.valueOf(o.optString("type")) }.getOrNull()
             ?: return null
         return Trigger(

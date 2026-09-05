@@ -13,16 +13,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-/**
- * A quick-settings tile that cycles through saved profiles.
- *
- * The label is the profile currently applied; tapping applies the next one. No
- * countdown here, and none is needed: a profile cannot offline a core, so the
- * worst a stray tap can do is change some frequencies, and the next tap moves on.
- *
- * Deliberately not a shortcut that opens the app. The point of the tile is to
- * change something from the pull-down without unlocking anything.
- */
+/** Quick-settings tile that applies the next saved profile. */
 class ProfileTileService : TileService() {
 
     override fun onStartListening() {
@@ -77,8 +68,7 @@ class ProfileTileService : TileService() {
             active.isNullOrEmpty() -> "tap to apply"
             else -> active
         }
-        // Tile subtitles arrived in API 29. Below that there is one line to work
-        // with, and the profile name is the half worth showing.
+        // Tile subtitles start at API 29.
         if (Build.VERSION.SDK_INT >= 29) {
             tile.label = getString(R.string.app_name)
             tile.subtitle = status
@@ -93,15 +83,7 @@ class ProfileTileService : TileService() {
     }
 
     private companion object {
-        /**
-         * Outlives the tile, on purpose.
-         *
-         * The panel collapses on the tap that started the work, the system
-         * unbinds this service moments later, and a scope tied to it would be
-         * cancelled somewhere inside the probe -- leaving the tile relabelled to
-         * a profile that was never applied. Applying a profile takes a second or
-         * two and has to finish.
-         */
+        // TileService may be unbound as soon as the panel closes.
         val applyScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         val applyMutex = Mutex()
     }

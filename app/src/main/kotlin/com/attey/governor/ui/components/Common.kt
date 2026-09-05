@@ -39,11 +39,6 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-/**
- * Card wrapper used everywhere. Title is a small label; subtitle a one-liner
- * of context (e.g. "cpu7"). Content fills the body. No fancy padding, no
- * images -- this is a tool, not a marketing page.
- */
 @Composable
 fun SectionCard(
     title: String,
@@ -102,7 +97,6 @@ fun ValueRow(label: String, value: String, enabled: Boolean = true) {
     }
 }
 
-/** Render a missing feature as text, never as silence. */
 @Composable
 fun NotExposed(label: String) {
     val color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
@@ -124,10 +118,6 @@ fun NotExposed(label: String) {
     }
 }
 
-/**
- * Discrete slider snapping to a sorted list of frequencies. kHz in, GHz to 2dp out.
- * Fires onChange only on drag end (Slider's onValueChangeFinished).
- */
 @Composable
 fun FreqSlider(
     label: String,
@@ -141,10 +131,7 @@ fun FreqSlider(
         return
     }
     val sorted = remember(steps) { steps.sorted() }
-    // Nearest step, not first-at-or-above. A value the kernel reports but does
-    // not list -- a ceiling clamped between two table entries -- used to fall
-    // through to index 0, which meant opening the app and nudging the slider
-    // applied the *minimum* frequency. Silent, and exactly backwards.
+    // A clamped kernel value may sit between two advertised frequencies.
     val currentIndex = sorted.indices.minByOrNull { abs(sorted[it] - value) } ?: 0
     val maxIndex = (sorted.size - 1).toFloat().coerceAtLeast(1f)
     var dragIndex by remember { mutableIntStateOf(-1) }
@@ -174,7 +161,6 @@ fun FreqSlider(
             value = displayIndex.toFloat().coerceIn(0f, maxIndex),
             onValueChange = { dragIndex = it.roundToInt().coerceIn(0, sorted.size - 1) },
             valueRange = 0f..maxIndex,
-            // Discrete: one detent per entry in the frequency table.
             steps = (sorted.size - 2).coerceAtLeast(0),
             enabled = enabled,
             onValueChangeFinished = {
@@ -187,10 +173,6 @@ fun FreqSlider(
     }
 }
 
-/**
- * Dropdown selector. The label is on the left, the current value on the right
- * acts as a button. No animations, no fancy chips.
- */
 @Composable
 fun ChoiceRow(
     label: String,
@@ -218,8 +200,6 @@ fun ChoiceRow(
                 enabled = enabled,
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
             ) {
-                // The value carries the accent, not the label: a dropdown that
-                // renders exactly like static text is a control nobody presses.
                 Text(
                     text = selected,
                     style = MaterialTheme.typography.bodyMedium,
@@ -251,7 +231,6 @@ fun ChoiceRow(
 
 fun Long.kHzToGHz(): String = String.format(Locale.US, "%.2f GHz", this / 1_000_000.0)
 
-/** Small monospace, for anywhere a literal path is shown. */
 @Composable
 fun MonoText(text: String) {
     Text(
@@ -261,13 +240,6 @@ fun MonoText(text: String) {
     )
 }
 
-/**
- * A live readout: the number large and monospaced, the unit small beside it.
- *
- * One string in a monospace headline puts a full character cell between the
- * number and its unit, which reads as a typo. Splitting them also stops the
- * layout jumping when a digit is added.
- */
 @Composable
 fun Readout(
     value: String,
@@ -295,13 +267,7 @@ fun Readout(
     }
 }
 
-/**
- * A label and an editable value, committed on the keyboard's done action.
- *
- * Never per keystroke: each commit is a root write and a re-probe, so typing
- * "1200000" into a live tunable would write 1, then 12, then 120, and so on down
- * the field.
- */
+/** Commits on IME Done; each commit performs a root write and re-probe. */
 @Composable
 fun EditableRow(
     label: String,
@@ -331,5 +297,4 @@ fun EditableRow(
     }
 }
 
-/** The numeric half of [kHzToGHz], for use with [Readout]. */
 fun Long.kHzValue(): String = String.format(Locale.US, "%.2f", this / 1_000_000.0)

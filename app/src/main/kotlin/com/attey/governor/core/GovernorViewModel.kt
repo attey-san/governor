@@ -61,14 +61,7 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
         refresh()
     }
 
-    /**
-     * Saves what the device looked like the first time this app ran.
-     *
-     * Not "kernel defaults" -- by the time anyone installs this, a vendor daemon
-     * has usually already moved things, and that is exactly the state worth being
-     * able to get back to. Without it the only way back from a bad afternoon of
-     * tuning is a reboot.
-     */
+    /** Saves the first observed state as a restore point. */
     private fun captureAsFoundProfile(m: DeviceModel) {
         if (_profiles.value.any { it.name == AS_FOUND }) return
         val next = _profiles.value + ProfileEngine.snapshot(m, AS_FOUND)
@@ -76,7 +69,7 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
         else reject("Could not save the automatic as-found restore point")
     }
 
-    // --- Profiles
+    // Profiles
 
     fun saveCurrentAsProfile(name: String) {
         val m = model ?: return
@@ -111,11 +104,8 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         val nextProfiles = _profiles.value.filterNot { it.name == name }
-        // A trigger pointing at a profile that no longer exists would silently
-        // never fire, so it goes with it.
         val nextTriggers = _triggers.value.filterNot { it.profileName == name }
-        // Remove dependent triggers first. If the profile write then fails, the
-        // safe failure is an unused profile, not a live trigger with no target.
+        // Remove triggers first so a failed second write cannot leave dangling rules.
         if (!store.saveTriggers(nextTriggers)) {
             reject("Could not update the profile's trigger list; nothing was deleted")
             return
@@ -133,7 +123,7 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
         TriggerService.sync(getApplication())
     }
 
-    // --- Triggers
+    // Triggers
 
     fun addTrigger(
         type: TriggerType,
@@ -201,17 +191,10 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
         TriggerService.sync(getApplication())
     }
 
-    /**
-     * Re-reads the usage-access appop and the launcher list.
-     *
-     * The appop is granted in Settings, not in a dialog, so the only way to know
-     * it happened is to look again when the user comes back.
-     */
     fun recheckUsageAccess() {
         val app = getApplication<Application>()
         _hasUsageAccess.value = UsageAccess.hasAccess(app)
-        // Returning from Usage Access settings is also how the service learns
-        // that permission was revoked and restores an active app override.
+        // Sync also restores an override if access was revoked in Settings.
         TriggerService.sync(app)
         if (_hasUsageAccess.value && _installedApps.value.isEmpty()) {
             viewModelScope.launch(Dispatchers.IO) {
@@ -220,17 +203,9 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // --- Measurement
+    // Measurement
 
-    /**
-     * One window. A null [profileName] measures the device as it stands and keeps
-     * that as the baseline; a named profile is applied first and then compared
-     * against it.
-     *
-     * Deliberately not a back-to-back double run: that doubles the wait and still
-     * cannot control for what the phone was doing, and one stored baseline can be
-     * compared against every profile in turn.
-     */
+    /** A null profile records a baseline; a named profile compares against it. */
     fun startMeasurement(profileName: String?, minutes: Int) {
         val sh = shell ?: return
         val m = model ?: return
@@ -302,9 +277,7 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             shell = sh
-            // A probe walks roughly nine hundred nodes on hardware nobody here
-            // has seen. One that throws inside viewModelScope takes the process
-            // with it, on every launch, with no way for the user out of it.
+            // Surface probe failures instead of crashing on every launch.
             val m = withContext(Dispatchers.IO) { runCatching { DeviceProbe.probe(sh) } }
                 .getOrElse {
                     _state.value = UiState.NoRoot(
@@ -325,14 +298,7 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /**
-     * Live sampling follows the UI, not the ViewModel.
-     *
-     * [viewModelScope] lives until the activity is finished, so without this the
-     * poll below carries on through the screen being off and the app sitting in
-     * Recents: a root round trip over a hundred sysfs nodes every two seconds,
-     * indefinitely, from the app that exists to find exactly that.
-     */
+    /** Stops live root polling while the UI is not visible. */
     fun onUiStarted() {
         if (model != null) startLive()
     }
@@ -354,14 +320,12 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
                 val live = DeviceProbe.sampleLive(
                     shell = sh,
                     model = m,
-                    // 93 zones is too much to re-read twice a second's worth of
-                    // battery for a number that changes on the scale of minutes.
+                    // Thermal zones are sampled every fifth tick.
                     includeThermal = tick % 5 == 0,
                     previousHottest = previous,
                 )
                 val current = _state.value
-                // Carry the last full thermal read through the ticks that skip it,
-                // otherwise the screen blanks four times out of five.
+                // Retain zone values between thermal samples.
                 val merged = if (live.zoneTemps.isEmpty() && previousLive != null)
                     live.copy(zoneTemps = previousLive.zoneTemps) else live
                 if (current is UiState.Ready) _state.value = current.copy(live = merged)
@@ -371,7 +335,7 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // --- Writes
+    // Writes
 
     fun setPolicyFreq(policyId: Int, min: Long, max: Long) {
         val p = model?.policies?.firstOrNull { it.id == policyId } ?: return
@@ -385,8 +349,7 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setCoreOnline(cpu: Int, online: Boolean) {
-        // cpu0 is the boot CPU. Some kernels expose the node and then refuse the
-        // write; some accept it and hang. Neither is worth finding out on a phone.
+        // Never offline the boot CPU, even when its online node is exposed.
         if (cpu == 0) {
             reject("cpu0 cannot be taken offline")
             return
@@ -423,11 +386,6 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setVmTunable(name: String, value: String) = direct("/proc/sys/vm/$name", value)
 
-    /**
-     * A write that cannot wedge the phone: a governor tunable, a queue depth, a
-     * vm knob. Applied straight, with the read-back still reported if the kernel
-     * declined it.
-     */
     private fun direct(path: String, value: String) {
         val sh = shell ?: return
         viewModelScope.launch(Dispatchers.IO) {
@@ -436,30 +394,19 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /**
-     * A write that could. Applied, then undone in [REVERT_SECONDS] unless the
-     * user says to keep it.
-     *
-     * The countdown is the whole point. Offlining a core the scheduler is holding
-     * a lock on, or moving to a governor the vendor never tested, can take a phone
-     * down hard enough to need the power button held for ten seconds. This turns
-     * that into a wait.
-     */
+    /** Applies a risky write with a root-side automatic rollback. */
     private fun guarded(description: String, ops: List<Pair<String, String>>) {
         val sh = shell ?: return
         viewModelScope.launch(Dispatchers.IO) {
             kernelWriteMutex.withLock {
-                // A second change while one is already pending must not lose the
-                // original values -- otherwise "undo" walks back one step and leaves
-                // the phone in a state the user never chose. Oldest value wins.
+                // Preserve the oldest value when changes overlap.
                 val pending = (_state.value as? UiState.Ready)?.pending
                 val before = sh.readAll(ops.map { it.first }.distinct())
                 val merged = LinkedHashMap<String, String>()
                 pending?.restore?.forEach { (path, value) -> merged[path] = value }
                 for ((path) in ops) before[path]?.trim()?.let { merged.putIfAbsent(path, it) }
 
-                // Arm first. There must be no interval in which a risky write exists
-                // but only the app process knows how to put it back.
+                // Arm before writing so rollback never depends on the app process.
                 val guard = RollbackGuard.arm(sh, merged, REVERT_SECONDS)
                 if (guard == null) {
                     reject("Could not arm the automatic rollback; nothing was changed")
@@ -548,8 +495,7 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
                         val message = rejectionOf(path, Writer.write(sh, path, value))
                         if (message == null) rejected.remove(path) else rejected[path] = message
                     }
-                // If manual restoration was incomplete, leave the independent
-                // guard alive so it gets one more attempt at the original deadline.
+                // Leave the root guard armed if manual restoration was incomplete.
                 if (rejected.isEmpty()) RollbackGuard.disarm(sh, pending.guardToken)
             }
             reload(
@@ -569,13 +515,11 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
         if (current is UiState.Ready) _state.value = current.copy(lastRejection = null)
     }
 
-    // --- Plumbing
+    // State refresh
 
-    /** Re-probes and republishes, preserving whatever revert is in flight. */
     private suspend fun reload(rejection: String?) {
         val sh = shell ?: return
-        // Keep the last good model rather than crashing out of a write's
-        // coroutine: the write already happened either way.
+        // The write already happened, so retain the last model if probing fails.
         val m = runCatching { DeviceProbe.probe(sh) }.getOrNull() ?: model ?: return
         model = m
         val previous = _state.value as? UiState.Ready
@@ -616,7 +560,6 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
         super.onCleared()
     }
 
-    /** Unique even for two adds inside the same millisecond. */
     private fun nextTriggerId(): Long {
         val now = System.currentTimeMillis()
         val taken = _triggers.value.map { it.id }.toSet()

@@ -22,9 +22,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // The trigger watcher is a foreground service, and from API 33 a
-        // foreground service with no postable notification is a service the user
-        // cannot see running. Ask once; the app works either way.
+        // Triggers still work if notification permission is denied.
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
@@ -32,8 +30,7 @@ class MainActivity : ComponentActivity() {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
 
-        // Triggers survive a reboot through BootReceiver, but also need picking up
-        // after a force-stop, which kills the service without clearing the rules.
+        // Restart rules after a force-stop as well as after boot.
         TriggerService.sync(this)
 
         setContent {

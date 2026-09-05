@@ -24,14 +24,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.ConcurrentHashMap
 
-/**
- * Watches for the conditions a user attached a profile to, and applies it.
- *
- * A foreground service because that is the only way to keep receiving
- * ACTION_SCREEN_OFF, and because a background process quietly reclocking someone's
- * CPU without a visible notification is the behaviour this app is supposed to be
- * the opposite of.
- */
+/** Foreground service that watches profile trigger conditions. */
 class TriggerService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -42,13 +35,7 @@ class TriggerService : Service() {
     @Volatile private var triggers: List<Trigger> = emptyList()
     @Volatile private var profiles: List<Profile> = emptyList()
 
-    /**
-     * Threshold triggers fire on the *crossing*, not on the level.
-     *
-     * ACTION_BATTERY_CHANGED arrives every few seconds. Without this an armed
-     * "below 30%" trigger would re-apply its profile a hundred times on the way
-     * from 30 to 20, fighting anything the user did by hand in between.
-     */
+    // Threshold triggers fire once per crossing, not on every battery broadcast.
     private val armed = ConcurrentHashMap<Long, Boolean>()
 
     @Volatile private var appPollJob: Job? = null
@@ -57,13 +44,7 @@ class TriggerService : Service() {
     @Volatile private var appOverrideApplied = false
     private val appStateMutex = Mutex()
 
-    /**
-     * What was in effect before an app trigger took over.
-     *
-     * An app profile that never came back off would be a trap: open a game once
-     * and the phone stays clocked up until you notice. Entering the app snapshots
-     * the live settings, leaving it puts them back.
-     */
+    // Snapshot restored when the foreground app changes.
     @Volatile private var beforeApp: Profile? = null
 
     private val receiver = object : BroadcastReceiver() {
@@ -92,8 +73,7 @@ class TriggerService : Service() {
                 addAction(Intent.ACTION_SCREEN_OFF)
                 addAction(Intent.ACTION_BATTERY_CHANGED)
             },
-            // The battery and screen broadcasts are protected system ones; this
-            // flag is required from API 34 and harmless below it.
+            // Dynamic receivers require an export flag from API 34.
             if (Build.VERSION.SDK_INT >= 34) RECEIVER_EXPORTED else 0,
         )
     }
@@ -122,7 +102,6 @@ class TriggerService : Service() {
         syncAppPoll()
     }
 
-    /** Restores an app override whose trigger was disabled or lost permission. */
     private suspend fun restoreOrphanedAppOverride() {
         appStateMutex.withLock {
             if (!restoreAppOverrideLocked("restored settings after app trigger stopped")) return
@@ -130,7 +109,7 @@ class TriggerService : Service() {
         if (triggers.isEmpty()) stopSelf()
     }
 
-    /** Caller owns [appStateMutex]. */
+    /** Caller must hold [appStateMutex]. */
     private suspend fun restoreAppOverrideLocked(successMessage: String): Boolean {
         val restore = beforeApp ?: return true
         val shell = RootShell.get() ?: return false
@@ -152,13 +131,7 @@ class TriggerService : Service() {
         }
     }
 
-    /**
-     * Starts or stops the foreground-app poll.
-     *
-     * Nothing polls unless an app trigger exists and the screen is on. A battery
-     * app that quietly wakes every ten seconds forever would be exactly the kind
-     * of thing it is supposed to help you find.
-     */
+    /** Polls only while an app trigger is enabled and the screen is on. */
     private fun syncAppPoll() {
         val wanted = screenOn && triggers.any { it.type == TriggerType.APP_FOREGROUND } &&
             UsageAccess.hasAccess(this)
@@ -197,12 +170,10 @@ class TriggerService : Service() {
             return
         }
 
-        // This snapshot has to describe the transition, not service startup.
         val shell = RootShell.get() ?: return
         val device = DeviceProbe.probe(shell).also { model = it }
         val restore = beforeApp ?: ProfileEngine.snapshot(device, "before app")
-        // Persist a pending state before touching the kernel. If the process dies
-        // in between, the next service instance restores and safely retries.
+        // Persist the restore point before changing the kernel.
         if (!store.saveAppOverride(pkg, restore, applied = false)) {
             notify("could not save the pre-app restore point; profile not applied")
             return
@@ -217,8 +188,7 @@ class TriggerService : Service() {
                 "profile ${entering.profileName} was incomplete; restored prior settings"
             )
         ) {
-            // Do not retry a profile the kernel declined every ten seconds. It
-            // becomes eligible again after the app leaves and re-enters.
+            // Do not retry a rejected profile until the app is entered again.
             currentApp = pkg
         }
     }
@@ -262,9 +232,6 @@ class TriggerService : Service() {
 
         val out = mutableListOf<Trigger>()
         for (t in triggers) {
-            // The reading this trigger watches, and which side of the threshold
-            // it is on. Both come out of one lookup so the re-arm below cannot
-            // read a value the test above never saw.
             val reading = when (t.type) {
                 TriggerType.BATTERY_BELOW -> percent
                 TriggerType.TEMP_ABOVE -> tempC
@@ -280,8 +247,7 @@ class TriggerService : Service() {
                 out += t
                 armed[t.id] = false
             } else if (!over) {
-                // Re-arm with a few points of hysteresis so a value sitting exactly
-                // on the threshold does not oscillate.
+                // Hysteresis prevents repeated firing at the boundary.
                 val clear = when (t.type) {
                     TriggerType.BATTERY_BELOW -> reading >= t.threshold + HYSTERESIS
                     else -> reading <= t.threshold - HYSTERESIS
@@ -305,7 +271,7 @@ class TriggerService : Service() {
         return rejections.isEmpty()
     }
 
-    // --- Notification
+    // Notification
 
     private fun notify(text: String) {
         val nm = getSystemService(NotificationManager::class.java)
@@ -342,10 +308,8 @@ class TriggerService : Service() {
         private const val NOTIFICATION_ID = 1
         private const val HYSTERESIS = 3
 
-        /** Slow on purpose. See [syncAppPoll]. */
         const val APP_POLL_MS = 10_000L
 
-        /** Starts or refreshes the watcher. Safe to call repeatedly. */
         fun sync(context: Context) {
             val intent = Intent(context, TriggerService::class.java)
             val store = ProfileStore(context)

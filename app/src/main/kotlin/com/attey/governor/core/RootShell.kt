@@ -5,19 +5,8 @@ import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 
 /**
- * A persistent root shell.
- *
- * Probing a device touches on the order of a hundred sysfs nodes. Spawning `su`
- * once per read costs ~30ms each and turns a probe into a visible stall, so we
- * keep one shell open and delimit each command's output with a sentinel.
- *
- * Deliberately dependency-free: libsu would do this too, but this is sixty lines
- * and removes a version we would otherwise have to track.
- *
- * Never do arithmetic in here. Android's /system/bin/sh is mksh and its $(( ))
- * is 32-bit: it wraps silently above 2^31, which is below several counters this
- * app reads (block sectors, /proc/<pid>/io, uptime in ns). Emit raw strings and
- * do the maths in Kotlin.
+ * Persistent root shell used to batch sysfs reads. Avoid shell arithmetic here:
+ * mksh wraps it at 32 bits, below several counters we read.
  */
 class RootShell private constructor(
     private val process: Process,
@@ -26,13 +15,7 @@ class RootShell private constructor(
 ) {
     private val lock = Any()
 
-    /**
-     * Set when a command failed to finish in time.
-     *
-     * A timed-out command leaves unread output in the pipe, which would be handed
-     * to whatever runs next as if it were that command's answer. Rather than try
-     * to resynchronise, the shell is destroyed and [get] starts a fresh one.
-     */
+    // After a timeout, unread output can no longer be matched to a command.
     @Volatile private var broken = false
 
     val isUsable: Boolean get() = !broken && process.isAlive
@@ -54,11 +37,7 @@ class RootShell private constructor(
         while (true) {
             val line = readLineBefore(deadline)
             if (line == null) {
-                // Either the shell died or it stopped answering. Both mean this
-                // instance can no longer be trusted to line up commands with
-                // their output. Discard what arrived: a half-finished readAll
-                // looks exactly like a device where those nodes do not exist,
-                // and the UI would grey out working controls without a word.
+                // Discard partial output and replace the shell on the next call.
                 broken = true
                 runCatching { process.destroy() }
                 return ""
@@ -70,11 +49,7 @@ class RootShell private constructor(
         sb.toString()
     }
 
-    /**
-     * Blocking read with a deadline. `ready()` is checked first so a shell that
-     * has stopped producing output cannot park a coroutine forever -- which is
-     * what a hung `su` used to do, leaving the app on "probing" with no way back.
-     */
+    /** BufferedReader has no read timeout, so poll ready() until the deadline. */
     private fun readLineBefore(deadline: Long): String? {
         while (System.currentTimeMillis() < deadline) {
             try {
@@ -89,26 +64,14 @@ class RootShell private constructor(
     }
 
     /**
-     * Reads many paths in one round trip. Returns path -> contents, omitting any
-     * that do not exist.
-     *
-     * Uses the shell's `read` builtin rather than `cat`. Measured on the
-     * development device, 505 nodes cost 1356 ms through `cat` and 45 ms through
-     * `read` -- the whole difference is one fork per node, and a full probe
-     * touches roughly nine hundred of them. `v=` before each read matters: a
-     * failed read leaves the previous value in place, which would silently
-     * attribute one node's contents to the next.
-     *
-     * Only the first line is returned. Every tunable in this app is single-line;
-     * [readMultiline] exists for the ones that are not.
+     * Reads the first line of many paths in one shell round trip. The `read`
+     * builtin measured about 30x faster than forking `cat` for each path.
      */
     fun readAll(paths: List<String>): Map<String, String> {
         if (paths.isEmpty()) return emptyMap()
         val script = paths.joinToString("\n") { p ->
             val q = shellQuote(p)
-            // Android's `printf` is an external toybox process. `echo` and
-            // `read` are mksh builtins, keeping this one root round trip and no
-            // fork per node.
+            // Clear v because a failed read leaves its previous value intact.
             "if [ -e $q ]; then v=; IFS= read -r v < $q 2>/dev/null; " +
                 "echo $q'%%GOV%%'\"\$v\"; fi"
         }
@@ -116,17 +79,9 @@ class RootShell private constructor(
     }
 
     /**
-     * For nodes with more than one line, such as cpufreq's time_in_state.
-     *
-     * Each line is emitted separately with the path in front, rather than joined
-     * with a separator. The obvious shortcut -- join with \r and split again --
-     * is silently wrong: BufferedReader.readLine() treats a bare \r as a line
-     * terminator, so the joined string comes back already split, and every chunk
-     * after the first arrives without the path marker and is discarded. The
-     * result is a function that quietly returns only the first line of any file.
-     *
-     * That bug produced a residency breakdown reading "0.71 GHz, 100%" -- entirely
-     * plausible, entirely an artefact of only ever seeing line one.
+     * Reads multiline nodes such as time_in_state. Each output line repeats the
+     * path; a bare '\r' separator is unsafe because BufferedReader treats it as a
+     * line ending.
      */
     fun readMultiline(paths: List<String>): Map<String, String> {
         if (paths.isEmpty()) return emptyMap()
@@ -180,10 +135,7 @@ class RootShell private constructor(
                     val w = OutputStreamWriter(p.outputStream)
                     val r = BufferedReader(InputStreamReader(p.inputStream))
                     val shell = RootShell(p, w, r)
-                    // Prove we actually got uid 0 -- `su` existing is not the same
-                    // as `su` being granted.
-                    // Generous: this is the call the su prompt blocks, and the
-                    // user has to find the phone and tap Grant.
+                    // This call may wait while the user answers the root prompt.
                     if (shell.exec("id -u", GRANT_TIMEOUT_MS).trim() != "0") { shell.close(); null }
                     else { instance = shell; shell }
                 } catch (_: Exception) {

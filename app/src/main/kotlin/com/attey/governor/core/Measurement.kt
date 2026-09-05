@@ -4,27 +4,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlin.coroutines.coroutineContext
 
-/**
- * Measures what a setting actually costs.
- *
- * Every kernel manager lets you change things and none of them tell you whether
- * the change did anything, which is why the whole category runs on folklore.
- * This samples real draw for a fixed window and diffs two windows.
- *
- * It is honest about its limits: a phone is not a lab. Background work, signal
- * strength and screen content all move the number, so the comparison is only
- * meaningful when the two windows are run back to back doing the same thing, and
- * [MeasureResult.isSignificant] refuses to call anything under 5% a win.
- */
+/** Battery-draw and cpufreq-residency measurement windows. */
 object Measurement {
 
     private const val SAMPLE_MS = 2_000L
 
-    /**
-     * Runs one window, calling [onTick] after every sample so the UI can draw a
-     * live trace. Returns the completed run, or whatever was gathered if the
-     * coroutine is cancelled.
-     */
     suspend fun window(
         shell: RootShell,
         model: DeviceModel,
@@ -65,15 +49,7 @@ object Measurement {
         )
     }
 
-    /**
-     * Share of the window each frequency held, from the difference of two
-     * cumulative time_in_state reads.
-     *
-     * The counters are absolute since boot and 64-bit; the difference is what
-     * happened during the window. A frequency that gained no time is dropped
-     * rather than shown as 0%, so the list is what the CPU did, not a table of
-     * everything it could have done.
-     */
+    /** Converts cumulative time_in_state counters into shares of one window. */
     private fun residency(
         start: Map<Int, Map<Long, Long>>,
         end: Map<Int, Map<Long, Long>>,

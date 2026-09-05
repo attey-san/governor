@@ -1,12 +1,6 @@
 package com.attey.governor.core
 
-/**
- * One sysfs node, with its capabilities discovered rather than assumed.
- *
- * Every tunable in this app is a SysNode. Nothing is hardcoded to a device: if a
- * node is absent the UI greys it out instead of the app crashing, which is the
- * whole reason this is portable.
- */
+/** A probed sysfs node. */
 data class SysNode(
     val path: String,
     val exists: Boolean = false,
@@ -16,7 +10,6 @@ data class SysNode(
     val isUsable: Boolean get() = exists && writable
 
     companion object {
-        /** Probes [paths] in one round trip, returning a node for each. */
         fun probe(shell: RootShell, paths: List<String>): Map<String, SysNode> {
             if (paths.isEmpty()) return emptyMap()
             val modes = modes(shell, paths)
@@ -32,12 +25,9 @@ data class SysNode(
             }
         }
 
-        /** Returns path -> mode for many nodes with one `stat` process. */
         internal fun modes(shell: RootShell, paths: List<String>): Map<String, String> {
             if (paths.isEmpty()) return emptyMap()
-            // One stat for every path, not one stat per path. `stat` is a real
-            // binary, so each invocation is a fork: 43 paths cost 784 ms one at a
-            // time and 29 ms batched, on the development device.
+            // One stat process for the whole batch; toybox stat is not a builtin.
             val modes = HashMap<String, String>(paths.size)
             val statOut = shell.exec(
                 "stat -c '%n %a' ${paths.joinToString(" ") { shellQuote(it) }} 2>/dev/null"
@@ -52,16 +42,8 @@ data class SysNode(
 
         internal fun writable(mode: String?): Boolean = ownerWritable(mode.orEmpty())
 
-        /**
-         * Writability from the mode bits, not from `[ -w ]`.
-         *
-         * `[ -w ]` calls access(2), which consults SELinux. On the development
-         * device every cpufreq node failed that test while writes to them
-         * demonstrably worked -- scaling_max_freq is system:system 0664 and the
-         * shell's domain is denied by policy, yet the write goes through. Trusting
-         * access(2) greys out every control in the app on a device where all of
-         * them work, which is the worst kind of wrong: quiet and plausible.
-         */
+        // `[ -w ]` consults SELinux and reports false for writable cpufreq nodes
+        // on some rooted devices. The owner write bit matches app-su behavior.
         private fun ownerWritable(mode: String): Boolean {
             val m = mode.trim()
             if (m.length < 3) return false
@@ -71,7 +53,6 @@ data class SysNode(
     }
 }
 
-/** Result of attempting a write. Never throws -- sysfs rejects values routinely. */
 sealed interface WriteResult {
     data object Ok : WriteResult
     data class Rejected(val wanted: String, val actual: String) : WriteResult
@@ -79,15 +60,8 @@ sealed interface WriteResult {
 }
 
 object Writer {
-    /**
-     * Paths this app will never write, regardless of what the UI asks for.
-     *
-     * Thermal cooling devices are a hard no. On the development device the
-     * userspace thermal governor re-parks any change within 15 seconds, and the
-     * same phone was measured at 82C junction under load. Fighting a working
-     * closed-loop thermal governor is both futile and a burn risk, so the option
-     * does not exist rather than being merely discouraged.
-     */
+    // Thermal stays read-only. Vendor thermal control is a closed loop and
+    // overwrites manual cooling-state changes.
     private val DENY = listOf(
         Regex("^/sys/class/thermal/cooling_device\\d+/cur_state$"),
         Regex("^/sys/class/thermal/thermal_zone\\d+/"),
@@ -96,7 +70,6 @@ object Writer {
 
     private fun isDenied(path: String): Boolean = DENY.any { it.containsMatchIn(path) }
 
-    /** The only kernel surfaces Governor is allowed to change. */
     private val ALLOW = listOf(
         Regex("^/sys/devices/system/cpu/cpufreq/policy\\d+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)?$"),
         Regex("^/sys/devices/system/cpu/cpu\\d+/online$"),
@@ -115,43 +88,27 @@ object Writer {
     private fun invalidValue(value: String): Boolean =
         value.any(Char::isISOControl)
 
-    /**
-     * Writes [value] to [path] and reads it back. sysfs frequently accepts a
-     * write and then stores something else -- a clamped frequency, or nothing at
-     * all -- so the read-back is the only honest confirmation.
-     */
+    /** Writes a value and verifies the value exposed by the node afterward. */
     fun write(shell: RootShell, path: String, value: String): WriteResult {
         if (isDenied(path)) return WriteResult.Refused("thermal nodes are not writable by this app")
         if (!isAllowedPath(path)) return WriteResult.Refused("path is outside Governor's write allowlist")
-        // A control character from a damaged profile can split or terminate the
-        // shell command. Quotes are safe because shellQuote encodes them.
+        // Control characters could split or terminate the command.
         if (invalidValue(value)) {
             return WriteResult.Refused("value contains a control character")
         }
-        // No trailing whitespace: at least one kernel interface (cpu_boost's
-        // input_boost_freq) rejects a value written with a trailing space and
-        // silently keeps the old one.
+        // input_boost_freq rejects otherwise valid values with trailing spaces.
         val v = value.trim()
         shell.exec("print -nr -- ${shellQuote(v)} > ${shellQuote(path)} 2>/dev/null")
         val back = shell.readAll(listOf(path))[path].orEmpty().trim()
         return if (accepted(back, v)) WriteResult.Ok else WriteResult.Rejected(v, back)
     }
 
-    /** A guarded write for generated boot scripts, or null for unsafe input. */
     internal fun shellWriteLine(path: String, value: String): String? {
         if (!isAllowedPath(path) || invalidValue(value)) return null
         return "[ -e ${shellQuote(path)} ] && print -nr -- ${shellQuote(value.trim())} > ${shellQuote(path)}"
     }
 
-    /**
-     * Whether the read-back means the write landed.
-     *
-     * Some nodes echo the value straight back. Some answer with the whole menu
-     * and brackets round the active entry -- `none [mq-deadline] kyber` -- so a
-     * plain token match calls a successful scheduler change a rejection, which
-     * is the worst answer available: the write worked and the app says it did
-     * not.
-     */
+    /** Handles both scalar read-back and bracketed scheduler menus. */
     internal fun accepted(back: String, wanted: String): Boolean {
         if (back == wanted) return true
         val active = Regex("(?:^|\\s)\\[([^]]+)](?:\\s|$)").find(back)?.groupValues?.get(1)

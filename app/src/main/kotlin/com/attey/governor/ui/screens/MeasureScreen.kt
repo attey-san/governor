@@ -146,13 +146,6 @@ private fun RunCard(run: MeasureRun) {
     }
 }
 
-/**
- * The trace, with no axes.
- *
- * The shape is the point -- whether draw is steady, spiky or drifting -- and an
- * axis on a 64dp strip would cost more room than it explains. The floor and
- * ceiling are printed instead, so the scale is never implied.
- */
 @Composable
 private fun Sparkline(samples: List<Int>) {
     if (samples.size < 2) return
@@ -199,8 +192,7 @@ private fun ResultCard(result: MeasureResult) {
         ValueRow(result.candidate.label, "${result.candidate.averageMilliwatts ?: 0} mW")
         if (!significant) {
             Text(
-                "Under 5% of the baseline. On a phone that is inside the noise, so this " +
-                    "is reported as nothing rather than as a win.",
+                "Under 5% of the baseline, within expected measurement noise.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

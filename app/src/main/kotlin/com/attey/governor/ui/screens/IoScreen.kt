@@ -78,9 +78,6 @@ private fun BlockCard(
             enabled = dev.availableSchedulers.size > 1 && dev.schedulerWritable,
             onSelect = onSetScheduler,
         )
-        // Both take a plain integer and reject anything else, so a value that
-        // will not parse is dropped here rather than sent to the kernel to be
-        // refused with a message about a node the user never typed.
         EditableRow("read_ahead_kb", dev.readAheadKb.toString(), dev.readAheadWritable) { v ->
             v.toLongOrNull()?.let(onSetReadAhead)
         }
@@ -128,11 +125,6 @@ private fun VirtualCollapsed(virtual: List<BlockDevice>) {
     }
 }
 
-/**
- * Read-only. A dm target's queue sits above the real device's and tuning it
- * moves nothing; showing the values is still worth it, because a scheduler of
- * `none` on dm-46 is the usual reason /data looks untuned.
- */
 @Composable
 private fun VirtualRow(dev: BlockDevice) {
     Text(

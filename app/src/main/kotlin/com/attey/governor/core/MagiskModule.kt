@@ -6,14 +6,7 @@ import java.util.Locale
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
-/**
- * Writes a flashable Magisk/KernelSU module that re-applies a profile at boot.
- *
- * The 45-second delay is not caution, it is the measured requirement. Vendor
- * init and the userspace thermal daemon come up late and overwrite cpufreq
- * settings written during early boot; a module without the delay looks like it
- * did nothing, which is exactly how an evening went in the alioth-perf work.
- */
+/** Builds a Magisk/KernelSU module that applies a profile after late vendor init. */
 object MagiskModule {
 
     private const val BOOT_DELAY_SECONDS = 45
@@ -25,9 +18,7 @@ object MagiskModule {
             .take(48)
             .ifEmpty { "profile" }
         val displayName = profile.name.replace(Regex("[\\r\\n]"), " ").trim().take(80)
-        // Falls back to internal storage: getExternalFilesDir returns null while
-        // external storage is unmounted, and File(null, name) would quietly write
-        // a relative path into the process's working directory.
+        // External app storage can be unavailable before it is mounted.
         val base = context.getExternalFilesDir(null) ?: context.filesDir
         val dir = File(base, "modules").apply { check(isDirectory || mkdirs()) }
         val out = File(dir, "governor-$safeName.zip")
@@ -55,8 +46,6 @@ object MagiskModule {
         ZipOutputStream(out.outputStream().buffered()).use { zip ->
             zip.entry("module.prop", prop)
             zip.entry("service.sh", service)
-            // Present so Magisk's installer has something to source; the real work
-            // is in service.sh, which runs late enough to survive.
             zip.entry("customize.sh", "#!/system/bin/sh\nSKIPUNZIP=0\n")
             zip.entry("META-INF/com/google/android/update-binary", UPDATE_BINARY)
             zip.entry("META-INF/com/google/android/updater-script", "#MAGISK\n")
@@ -64,14 +53,7 @@ object MagiskModule {
         return out
     }
 
-    /**
-     * The stock Magisk installer stub.
-     *
-     * Not optional. Both the Magisk app and recovery *execute* this file to
-     * install a module -- a zip carrying only module.prop and service.sh is
-     * rejected outright, which is a failure the user would only discover at
-     * flash time. KernelSU and APatch accept the same stub.
-     */
+    /** Installer entry point shared by Magisk, KernelSU, and APatch. */
     private val UPDATE_BINARY = """
         #!/sbin/sh
         umask 022
