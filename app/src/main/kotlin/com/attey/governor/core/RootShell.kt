@@ -1,7 +1,5 @@
 package com.attey.governor.core
 
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
@@ -90,8 +88,6 @@ class RootShell private constructor(
         return null
     }
 
-    suspend fun execAsync(cmd: String): String = withContext(Dispatchers.IO) { exec(cmd) }
-
     /**
      * Reads many paths in one round trip. Returns path -> contents, omitting any
      * that do not exist.
@@ -109,7 +105,12 @@ class RootShell private constructor(
     fun readAll(paths: List<String>): Map<String, String> {
         if (paths.isEmpty()) return emptyMap()
         val script = paths.joinToString("\n") { p ->
-            "if [ -e '$p' ]; then v=; IFS= read -r v < '$p' 2>/dev/null; echo \"$p%%GOV%%\$v\"; fi"
+            val q = shellQuote(p)
+            // Android's `printf` is an external toybox process. `echo` and
+            // `read` are mksh builtins, keeping this one root round trip and no
+            // fork per node.
+            "if [ -e $q ]; then v=; IFS= read -r v < $q 2>/dev/null; " +
+                "echo $q'%%GOV%%'\"\$v\"; fi"
         }
         return parse(exec(script))
     }
@@ -130,8 +131,9 @@ class RootShell private constructor(
     fun readMultiline(paths: List<String>): Map<String, String> {
         if (paths.isEmpty()) return emptyMap()
         val script = paths.joinToString("\n") { p ->
-            "if [ -e '$p' ]; then while IFS= read -r l || [ -n \"\$l\" ]; do " +
-                "echo \"$p%%GOV%%\$l\"; done < '$p' 2>/dev/null; fi"
+            val q = shellQuote(p)
+            "if [ -e $q ]; then while IFS= read -r l || [ -n \"\$l\" ]; do " +
+                "echo $q'%%GOV%%'\"\$l\"; done < $q 2>/dev/null; fi"
         }
         val grouped = LinkedHashMap<String, StringBuilder>()
         for (line in exec(script).lineSequence()) {

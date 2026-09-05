@@ -92,8 +92,8 @@ fun ThermalScreen(zones: List<ThermalZone>, live: LiveStats) {
                 val unpopulated = zones.size - readings.size
                 if (unpopulated > 0) {
                     Text(
-                        "$unpopulated zone(s) hidden: they read below -30 °C, which means " +
-                            "the sensor is not wired up, not that anything is cold.",
+                        "$unpopulated zone(s) hidden: unreadable or below -30 °C. These are " +
+                            "not usable temperature reports.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

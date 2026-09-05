@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.Locale
 
@@ -70,8 +71,9 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
      */
     private fun captureAsFoundProfile(m: DeviceModel) {
         if (_profiles.value.any { it.name == AS_FOUND }) return
-        _profiles.value = _profiles.value + ProfileEngine.snapshot(m, AS_FOUND)
-        store.saveProfiles(_profiles.value)
+        val next = _profiles.value + ProfileEngine.snapshot(m, AS_FOUND)
+        if (store.saveProfiles(next)) _profiles.value = next
+        else reject("Could not save the automatic as-found restore point")
     }
 
     // --- Profiles
@@ -79,9 +81,12 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
     fun saveCurrentAsProfile(name: String) {
         val m = model ?: return
         val trimmed = name.trim()
-        if (trimmed.isEmpty() || _profiles.value.any { it.name.equals(trimmed, true) }) return
-        _profiles.value = _profiles.value + ProfileEngine.snapshot(m, trimmed)
-        store.saveProfiles(_profiles.value)
+        if (trimmed.isEmpty() || trimmed.length > 80 || trimmed.any(Char::isISOControl) ||
+            _profiles.value.any { it.name.equals(trimmed, true) }
+        ) return
+        val next = _profiles.value + ProfileEngine.snapshot(m, trimmed)
+        if (store.saveProfiles(next)) _profiles.value = next
+        else reject("Could not save profile \"$trimmed\"")
     }
 
     fun applyProfile(name: String) {
@@ -90,17 +95,41 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
         val profile = _profiles.value.firstOrNull { it.name == name } ?: return
         viewModelScope.launch(Dispatchers.IO) {
             val rejections = ProfileEngine.apply(sh, m, profile)
-            reload(rejections.firstOrNull()?.let { "\"$name\": $it" })
+            val issue = when {
+                rejections.isNotEmpty() -> "\"$name\": ${rejections.first()}"
+                !store.saveActiveProfile(profile.name) ->
+                    "\"$name\" applied, but its active marker could not be saved"
+                else -> null
+            }
+            reload(issue)
         }
     }
 
     fun deleteProfile(name: String) {
-        _profiles.value = _profiles.value.filterNot { it.name == name }
-        store.saveProfiles(_profiles.value)
+        if (name == AS_FOUND) {
+            reject("The as-found profile is the automatic restore point and cannot be deleted")
+            return
+        }
+        val nextProfiles = _profiles.value.filterNot { it.name == name }
         // A trigger pointing at a profile that no longer exists would silently
         // never fire, so it goes with it.
-        _triggers.value = _triggers.value.filterNot { it.profileName == name }
-        store.saveTriggers(_triggers.value)
+        val nextTriggers = _triggers.value.filterNot { it.profileName == name }
+        // Remove dependent triggers first. If the profile write then fails, the
+        // safe failure is an unused profile, not a live trigger with no target.
+        if (!store.saveTriggers(nextTriggers)) {
+            reject("Could not update the profile's trigger list; nothing was deleted")
+            return
+        }
+        _triggers.value = nextTriggers
+        if (!store.saveProfiles(nextProfiles)) {
+            reject("Its triggers were removed, but profile \"$name\" could not be deleted")
+            TriggerService.sync(getApplication())
+            return
+        }
+        _profiles.value = nextProfiles
+        if (store.loadActiveProfile() == name && !store.clearActiveProfile()) {
+            reject("Profile deleted, but its active marker could not be cleared")
+        }
         TriggerService.sync(getApplication())
     }
 
@@ -115,7 +144,27 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
     ) {
         if (_profiles.value.none { it.name == profileName }) return
         if (type.needsApp && packageName.isEmpty()) return
-        _triggers.value = _triggers.value +
+        val validThreshold = when (type) {
+            TriggerType.BATTERY_BELOW -> threshold in 1..100
+            TriggerType.TEMP_ABOVE -> threshold in 0..120
+            else -> true
+        }
+        if (!validThreshold) {
+            reject("That trigger threshold is outside its valid range")
+            return
+        }
+        val conflicts = _triggers.value.any { existing ->
+            existing.type == type && when {
+                type.needsApp -> existing.packageName == packageName
+                type.needsThreshold -> existing.threshold == threshold
+                else -> true
+            }
+        }
+        if (conflicts) {
+            reject("A trigger already exists for that condition")
+            return
+        }
+        val next = _triggers.value +
             Trigger(
                 id = nextTriggerId(),
                 type = type,
@@ -124,19 +173,31 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
                 packageName = packageName,
                 appLabel = appLabel,
             )
-        store.saveTriggers(_triggers.value)
+        if (!store.saveTriggers(next)) {
+            reject("Could not save the trigger")
+            return
+        }
+        _triggers.value = next
         TriggerService.sync(getApplication())
     }
 
     fun setTriggerEnabled(id: Long, enabled: Boolean) {
-        _triggers.value = _triggers.value.map { if (it.id == id) it.copy(enabled = enabled) else it }
-        store.saveTriggers(_triggers.value)
+        val next = _triggers.value.map { if (it.id == id) it.copy(enabled = enabled) else it }
+        if (!store.saveTriggers(next)) {
+            reject("Could not update the trigger")
+            return
+        }
+        _triggers.value = next
         TriggerService.sync(getApplication())
     }
 
     fun deleteTrigger(id: Long) {
-        _triggers.value = _triggers.value.filterNot { it.id == id }
-        store.saveTriggers(_triggers.value)
+        val next = _triggers.value.filterNot { it.id == id }
+        if (!store.saveTriggers(next)) {
+            reject("Could not delete the trigger")
+            return
+        }
+        _triggers.value = next
         TriggerService.sync(getApplication())
     }
 
@@ -149,6 +210,9 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
     fun recheckUsageAccess() {
         val app = getApplication<Application>()
         _hasUsageAccess.value = UsageAccess.hasAccess(app)
+        // Returning from Usage Access settings is also how the service learns
+        // that permission was revoked and restores an active app override.
+        TriggerService.sync(app)
         if (_hasUsageAccess.value && _installedApps.value.isEmpty()) {
             viewModelScope.launch(Dispatchers.IO) {
                 _installedApps.value = UsageAccess.installedApps(app)
@@ -170,14 +234,31 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
     fun startMeasurement(profileName: String?, minutes: Int) {
         val sh = shell ?: return
         val m = model ?: return
+        val profile = profileName?.let { name ->
+            _profiles.value.firstOrNull { it.name == name } ?: run {
+                reject("Profile \"$name\" no longer exists")
+                return
+            }
+        }
+        if (profile != null && baseline == null) {
+            reject("Measure a baseline before comparing a profile")
+            return
+        }
         measureJob?.cancel()
+        _lastResult.value = null
+        val durationSeconds = minutes.coerceIn(1, 60) * 60
         measureJob = viewModelScope.launch(Dispatchers.IO) {
-            if (profileName != null) {
-                _profiles.value.firstOrNull { it.name == profileName }
-                    ?.let { ProfileEngine.apply(sh, m, it) }
+            if (profile != null) {
+                val rejections = ProfileEngine.apply(sh, m, profile)
+                if (rejections.isNotEmpty()) {
+                    _measurement.value = null
+                    reload("\"${profile.name}\" was not measured: ${rejections.first()}")
+                    return@launch
+                }
             }
             val label = profileName ?: "baseline"
-            val run = Measurement.window(sh, m, label, minutes * 60) { _measurement.value = it }
+            _measurement.value = MeasureRun(label, true, 0, durationSeconds)
+            val run = Measurement.window(sh, m, label, durationSeconds) { _measurement.value = it }
             _measurement.value = run
             if (profileName == null) {
                 baseline = run
@@ -191,6 +272,7 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun stopMeasurement() {
         measureJob?.cancel()
+        measureJob = null
         _measurement.value = _measurement.value?.copy(running = false)
     }
 
@@ -198,9 +280,12 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
         val m = model ?: return
         val profile = _profiles.value.firstOrNull { it.name == profileName } ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            _moduleExport.value = runCatching {
-                MagiskModule.generate(getApplication(), m, profile).absolutePath
-            }.getOrNull()
+            runCatching { MagiskModule.generate(getApplication(), m, profile).absolutePath }
+                .onSuccess { _moduleExport.value = it }
+                .onFailure {
+                    _moduleExport.value = null
+                    reject("Module not written: ${it.message ?: it::class.simpleName}")
+                }
         }
     }
 
@@ -290,14 +375,7 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setPolicyFreq(policyId: Int, min: Long, max: Long) {
         val p = model?.policies?.firstOrNull { it.id == policyId } ?: return
-        // Widen before narrowing. The kernel clamps a min written above the
-        // current max and a max written below the current min, and the clamp is
-        // silent -- you get a value you did not ask for and no error.
-        val ops = if (max >= p.scalingMax) {
-            listOf(p.maxNode to max.toString(), p.minNode to min.toString())
-        } else {
-            listOf(p.minNode to min.toString(), p.maxNode to max.toString())
-        }
+        val ops = ProfileEngine.frequencyWindowWrites(p.minNode, p.maxNode, min, max)
         guarded("${label(p)} ${range(min, max)}", ops)
     }
 
@@ -319,18 +397,16 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
-    fun setGpuFreq(min: Long, max: Long) {
-        val g = model?.gpus?.firstOrNull() ?: return
-        val ops = if (max >= g.maxFreq) {
-            listOf("${g.path}/max_freq" to max.toString(), "${g.path}/min_freq" to min.toString())
-        } else {
-            listOf("${g.path}/min_freq" to min.toString(), "${g.path}/max_freq" to max.toString())
-        }
+    fun setGpuFreq(path: String, min: Long, max: Long) {
+        val g = model?.gpus?.firstOrNull { it.path == path } ?: return
+        val ops = ProfileEngine.frequencyWindowWrites(
+            "${g.path}/min_freq", "${g.path}/max_freq", min, max
+        )
         guarded("GPU ${max / 1_000_000} MHz", ops)
     }
 
-    fun setGpuGovernor(governor: String) {
-        val g = model?.gpus?.firstOrNull() ?: return
+    fun setGpuGovernor(path: String, governor: String) {
+        val g = model?.gpus?.firstOrNull { it.path == path } ?: return
         guarded("GPU governor \u2192 $governor", listOf("${g.path}/governor" to governor))
     }
 
@@ -355,7 +431,7 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
     private fun direct(path: String, value: String) {
         val sh = shell ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            val result = Writer.write(sh, path, value)
+            val result = kernelWriteMutex.withLock { Writer.write(sh, path, value) }
             reload(rejectionOf(path, result))
         }
     }
@@ -372,30 +448,45 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
     private fun guarded(description: String, ops: List<Pair<String, String>>) {
         val sh = shell ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            val before = sh.readAll(ops.map { it.first })
-            var rejection: String? = null
-            val restore = LinkedHashMap<String, String>()
-            for ((path, value) in ops) {
-                before[path]?.trim()?.let { restore.putIfAbsent(path, it) }
-                val result = Writer.write(sh, path, value)
-                rejectionOf(path, result)?.let { rejection = it }
-            }
+            kernelWriteMutex.withLock {
+                // A second change while one is already pending must not lose the
+                // original values -- otherwise "undo" walks back one step and leaves
+                // the phone in a state the user never chose. Oldest value wins.
+                val pending = (_state.value as? UiState.Ready)?.pending
+                val before = sh.readAll(ops.map { it.first }.distinct())
+                val merged = LinkedHashMap<String, String>()
+                pending?.restore?.forEach { (path, value) -> merged[path] = value }
+                for ((path) in ops) before[path]?.trim()?.let { merged.putIfAbsent(path, it) }
 
-            // A second change while one is already pending must not lose the
-            // original values -- otherwise "undo" walks back one step and leaves
-            // the phone in a state the user never chose. Oldest value wins.
-            val pending = (_state.value as? UiState.Ready)?.pending
-            val merged = LinkedHashMap(restore)
-            pending?.restore?.forEach { (k, v) -> merged[k] = v }
+                // Arm first. There must be no interval in which a risky write exists
+                // but only the app process knows how to put it back.
+                val guard = RollbackGuard.arm(sh, merged, REVERT_SECONDS)
+                if (guard == null) {
+                    reject("Could not arm the automatic rollback; nothing was changed")
+                    return@launch
+                }
+                if (pending != null && !RollbackGuard.disarm(sh, pending.guardToken)) {
+                    RollbackGuard.disarm(sh, guard)
+                    reject("The previous rollback had already started; nothing else was changed")
+                    return@launch
+                }
 
-            reload(rejection)
-            val current = _state.value
-            if (current is UiState.Ready) {
-                _state.value = current.copy(
-                    pending = PendingRevert(description, REVERT_SECONDS, merged),
-                )
+                val rejected = LinkedHashMap<String, String>()
+                for ((path, value) in ops) {
+                    val result = Writer.write(sh, path, value)
+                    val message = rejectionOf(path, result)
+                    if (message == null) rejected.remove(path) else rejected[path] = message
+                }
+
+                reload(rejected.values.firstOrNull())
+                val current = _state.value
+                if (current is UiState.Ready) {
+                    _state.value = current.copy(
+                        pending = PendingRevert(description, REVERT_SECONDS, merged, guard),
+                    )
+                }
+                startCountdown()
             }
-            startCountdown()
         }
     }
 
@@ -416,8 +507,31 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun confirmPending() {
         revertJob?.cancel()
-        val current = _state.value
-        if (current is UiState.Ready) _state.value = current.copy(pending = null)
+        val sh = shell ?: return
+        val pending = (_state.value as? UiState.Ready)?.pending ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            kernelWriteMutex.withLock {
+                val currentPending = (_state.value as? UiState.Ready)?.pending
+                if (currentPending?.guardToken != pending.guardToken) return@withLock
+                if (RollbackGuard.disarm(sh, pending.guardToken)) {
+                    val current = _state.value
+                    if (current is UiState.Ready &&
+                        current.pending?.guardToken == pending.guardToken
+                    ) {
+                        _state.value = current.copy(pending = null)
+                    }
+                } else {
+                    delay(250)
+                    reload("The rollback had already started; the change was not kept")
+                    val current = _state.value
+                    if (current is UiState.Ready &&
+                        current.pending?.guardToken == pending.guardToken
+                    ) {
+                        _state.value = current.copy(pending = null)
+                    }
+                }
+            }
+        }
     }
 
     fun revertPending() {
@@ -425,10 +539,28 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
         val sh = shell ?: return
         val pending = (_state.value as? UiState.Ready)?.pending ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            pending.restore.forEach { (path, value) -> Writer.write(sh, path, value) }
-            reload(null)
+            val rejected = LinkedHashMap<String, String>()
+            kernelWriteMutex.withLock {
+                val currentPending = (_state.value as? UiState.Ready)?.pending
+                if (currentPending?.guardToken != pending.guardToken) return@withLock
+                ProfileEngine.restorationWrites(pending.restore)
+                    .forEach { (path, value) ->
+                        val message = rejectionOf(path, Writer.write(sh, path, value))
+                        if (message == null) rejected.remove(path) else rejected[path] = message
+                    }
+                // If manual restoration was incomplete, leave the independent
+                // guard alive so it gets one more attempt at the original deadline.
+                if (rejected.isEmpty()) RollbackGuard.disarm(sh, pending.guardToken)
+            }
+            reload(
+                rejected.values.firstOrNull()?.let {
+                    "Manual rollback was incomplete; the root guard will retry: $it"
+                }
+            )
             val current = _state.value
-            if (current is UiState.Ready) _state.value = current.copy(pending = null)
+            if (current is UiState.Ready && current.pending?.guardToken == pending.guardToken) {
+                _state.value = current.copy(pending = null)
+            }
         }
     }
 

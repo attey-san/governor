@@ -21,6 +21,7 @@ data class DeviceModel(
     val zram: Map<String, SysNode> = emptyMap(),
     /** cpu index -> online. A core with no `online` node cannot be taken down. */
     val coresOnline: Map<Int, Boolean> = emptyMap(),
+    val hotpluggableCores: Set<Int> = emptySet(),
     val rootProvider: String = "unknown",
     val kernel: String = "",
 ) {
@@ -53,6 +54,9 @@ data class CpuPolicy(
     val scalingMax: Long,
     val governor: String,
     val availableGovernors: List<String>,
+    val minWritable: Boolean,
+    val maxWritable: Boolean,
+    val governorWritable: Boolean,
     /** Auto-discovered from policyN/<governor>/ -- never a hardcoded list. */
     val governorTunables: Map<String, SysNode> = emptyMap(),
 ) {
@@ -76,6 +80,9 @@ data class GpuDevice(
     val maxFreq: Long,
     val governor: String,
     val availableGovernors: List<String>,
+    val minWritable: Boolean,
+    val maxWritable: Boolean,
+    val governorWritable: Boolean,
 )
 
 data class BatteryNodes(
@@ -100,8 +107,11 @@ data class BlockDevice(
     val path: String,
     val scheduler: String,
     val availableSchedulers: List<String>,
+    val schedulerWritable: Boolean,
     val readAheadKb: Long,
+    val readAheadWritable: Boolean,
     val nrRequests: Long,
+    val nrRequestsWritable: Boolean,
     val rotational: Boolean,
     /**
      * dm-*, loop*, ram* and zram* are stacked or virtual. They have queues and

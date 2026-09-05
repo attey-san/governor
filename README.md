@@ -24,7 +24,8 @@ rather than as a win, because sampling noise on a phone is easily that large.
 
 Every change that could wedge a phone — a governor swap, an offlined core, a frequency
 ceiling — is applied with a 30-second countdown. Don't confirm, and it goes back. Desktop
-display settings have worked this way for twenty years.
+display settings have worked this way for twenty years. The rollback is owned by a detached
+root process, so it still runs if Governor is closed or Android kills its process.
 
 And it will tell you what your kernel has: a browsable report of 79 known tunables against
 what this one actually exposes, with paths, and read-only marked separately from writable.
@@ -68,7 +69,7 @@ separated from `dm-*`, `loop*` and `zram*`, and mount points are resolved throug
 | **Thermal** | Every zone, read-only, unpopulated sensors labelled as such |
 | **I/O** | Scheduler, read-ahead and queue depth per real block device, virtual ones listed read-only |
 | **Memory** | vm tunables, zram, and a per-CPU input-boost editor |
-| **Profiles** | Named settings, applied by trigger, exportable as a Magisk module |
+| **Profiles** | Named settings, applied by trigger, exportable and shareable as a Magisk module |
 | **Measure** | A/B battery draw with residency breakdown |
 | **Capability** | What this kernel exposes, out of what is known to exist |
 
@@ -90,7 +91,8 @@ Nothing is polled unless an app trigger exists, and then only while the screen i
 Profiles export as a flashable Magisk/KernelSU module. The generated script waits **45
 seconds** before writing: vendor init and the userspace thermal daemon start late and will
 overwrite anything applied earlier, which is why modules that write at `post-fs-data` look
-like they did nothing.
+like they did nothing. The generated zip can be sent directly to a file manager or root
+manager through Android's share sheet.
 
 ## Requirements
 
@@ -98,12 +100,14 @@ like they did nothing.
 - Root: Magisk, KernelSU or APatch
 - Usage access, **only** if you want per-app profiles
 
+Governor does not request network access.
+
 ## Building
 
 ```sh
 git clone https://github.com/attey-san/governor
 cd governor
-./gradlew assembleDebug
+./gradlew testDebugUnitTest assembleDebug assembleRelease lintDebug
 ```
 
 Needs a JDK 21 toolchain and an Android SDK with API 36 platform. If your default `java`

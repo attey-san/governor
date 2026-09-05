@@ -1,5 +1,6 @@
 package com.attey.governor.ui
 
+import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,7 +18,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -39,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.attey.governor.core.GovernorViewModel
@@ -54,6 +56,7 @@ import com.attey.governor.ui.screens.MeasureScreen
 import com.attey.governor.ui.screens.MemoryScreen
 import com.attey.governor.ui.screens.ProfilesScreen
 import com.attey.governor.ui.screens.ThermalScreen
+import java.io.File
 import java.util.Locale
 
 private val TABS = listOf(
@@ -161,7 +164,7 @@ private fun ReadyScaffold(state: UiState.Ready, vm: GovernorViewModel) {
                         containerColor = MaterialTheme.colorScheme.surface,
                     ),
                 )
-                ScrollableTabRow(
+                PrimaryScrollableTabRow(
                     selectedTabIndex = selected,
                     edgePadding = 8.dp,
                     containerColor = MaterialTheme.colorScheme.surface,
@@ -226,6 +229,20 @@ private fun ReadyScaffold(state: UiState.Ready, vm: GovernorViewModel) {
                     onSetTriggerEnabled = vm::setTriggerEnabled,
                     onDeleteTrigger = vm::deleteTrigger,
                     onExportModule = vm::exportMagiskModule,
+                    onShareModule = { path ->
+                        val file = File(path)
+                        val uri = FileProvider.getUriForFile(
+                            context,
+                            "${context.packageName}.files",
+                            file,
+                        )
+                        val intent = Intent(Intent.ACTION_SEND).apply {
+                            type = "application/zip"
+                            putExtra(Intent.EXTRA_STREAM, uri)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        context.startActivity(Intent.createChooser(intent, "Share Governor module"))
+                    },
                 )
                 7 -> MeasureScreen(
                     device = state.device,

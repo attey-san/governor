@@ -8,6 +8,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.Process
 import android.provider.Settings
+import java.util.Locale
 
 /** One launchable app, for the per-app trigger picker. */
 data class InstalledApp(val packageName: String, val label: String)
@@ -64,6 +65,7 @@ object UsageAccess {
      * one interval wide has no room for the poll's own drift, and a switch that
      * falls in the gap is never seen at all.
      */
+    @Suppress("DEPRECATION")
     fun foregroundPackage(context: Context, sinceMs: Long): String? {
         if (!hasAccess(context)) return null
         val usage = context.getSystemService(UsageStatsManager::class.java) ?: return null
@@ -73,7 +75,12 @@ object UsageAccess {
         var last: String? = null
         while (events.hasNextEvent()) {
             events.getNextEvent(event)
-            if (event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND) last = event.packageName
+            val foregroundEvent = if (Build.VERSION.SDK_INT >= 29) {
+                UsageEvents.Event.ACTIVITY_RESUMED
+            } else {
+                UsageEvents.Event.MOVE_TO_FOREGROUND
+            }
+            if (event.eventType == foregroundEvent) last = event.packageName
         }
         return last
     }
@@ -88,6 +95,6 @@ object UsageAccess {
                 InstalledApp(pkg, info.loadLabel(pm).toString())
             }
             .distinctBy { it.packageName }
-            .sortedBy { it.label.lowercase() }
+            .sortedBy { it.label.lowercase(Locale.ROOT) }
     }
 }

@@ -50,6 +50,7 @@ fun ProfilesScreen(
     onSetTriggerEnabled: (Long, Boolean) -> Unit,
     onDeleteTrigger: (Long) -> Unit,
     onExportModule: (String) -> Unit,
+    onShareModule: (String) -> Unit,
 ) {
     var pendingDelete by remember { mutableStateOf<String?>(null) }
 
@@ -84,7 +85,9 @@ fun ProfilesScreen(
                         Button(onClick = { onApply(p.name) }) { Text("Apply") }
                         OutlinedButton(onClick = { onExportModule(p.name) }) { Text("Module") }
                         Spacer(modifier = Modifier.weight(1f))
-                        TextButton(onClick = { pendingDelete = p.name }) { Text("Delete") }
+                        if (p.name != "as found") {
+                            TextButton(onClick = { pendingDelete = p.name }) { Text("Delete") }
+                        }
                     }
                 }
             }
@@ -101,6 +104,7 @@ fun ProfilesScreen(
             item {
                 SectionCard(title = "module written") {
                     MonoText(exportPath)
+                    OutlinedButton(onClick = { onShareModule(exportPath) }) { Text("Share or save") }
                     Text(
                         "Flash it in Magisk. It re-applies the profile 45 seconds after boot — " +
                             "vendor init overwrites cpufreq settings written any earlier.",
@@ -129,7 +133,7 @@ fun ProfilesScreen(
 private fun SaveCard(profiles: List<Profile>, onSave: (String) -> Unit) {
     var name by remember { mutableStateOf("") }
     val duplicate = profiles.any { it.name.equals(name.trim(), true) }
-    val valid = name.isNotBlank() && !duplicate
+    val valid = name.isNotBlank() && name.trim().length <= 80 && !duplicate
 
     SectionCard(title = "save current settings", subtitle = "captures frequencies, governors and tunables") {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -164,6 +168,7 @@ private fun TriggersCard(
     var chosenApp by remember { mutableStateOf<InstalledApp?>(null) }
 
     val names = profiles.map { it.name }
+    val appOptions = apps.associateBy { "${it.label} · ${it.packageName}" }
     // Writing state during composition schedules another composition, which
     // writes again. Fall back to the first profile when reading instead.
     val target = chosen?.takeIf { it in names } ?: names.firstOrNull().orEmpty()
@@ -203,10 +208,11 @@ private fun TriggersCard(
             } else {
                 ChoiceRow(
                     label = "app",
-                    options = apps.map { it.label },
-                    selected = chosenApp?.label ?: apps.firstOrNull()?.label.orEmpty(),
+                    options = appOptions.keys.toList(),
+                    selected = chosenApp?.let { "${it.label} · ${it.packageName}" }
+                        ?: appOptions.keys.firstOrNull().orEmpty(),
                     enabled = apps.isNotEmpty(),
-                    onSelect = { label -> chosenApp = apps.firstOrNull { it.label == label } },
+                    onSelect = { option -> chosenApp = appOptions[option] },
                 )
                 Text(
                     "The settings in place when the app opens are put back when you leave it.",
@@ -251,9 +257,14 @@ private fun TriggersCard(
             }
             val app = chosenApp ?: apps.firstOrNull()
             val level = threshold.toIntOrNull()
+            val thresholdValid = when (type) {
+                TriggerType.BATTERY_BELOW -> level != null && level in 1..100
+                TriggerType.TEMP_ABOVE -> level != null && level in 0..120
+                else -> true
+            }
             Button(
                 enabled = names.isNotEmpty() && target.isNotEmpty() &&
-                    (!type.needsThreshold || level != null) &&
+                    (!type.needsThreshold || thresholdValid) &&
                     (!type.needsApp || (hasUsageAccess && app != null)),
                 onClick = {
                     onAdd(

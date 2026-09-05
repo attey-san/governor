@@ -50,7 +50,7 @@ private fun NowCard(live: LiveStats) {
                 unit = "mW",
                 color = if (live.charging) MaterialTheme.colorScheme.tertiary
                 else MaterialTheme.colorScheme.primary,
-                caption = if (live.charging) "charging" else "discharging",
+                caption = if (live.charging) "external power" else "discharging",
             )
         }
         val pct = live.batteryPercent

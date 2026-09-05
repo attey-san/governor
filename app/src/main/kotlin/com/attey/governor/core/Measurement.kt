@@ -88,5 +88,5 @@ object Measurement {
     }
 
     private fun List<Int>.averageOrNull(): Int? =
-        if (isEmpty()) null else (sum().toDouble() / size).toInt()
+        if (isEmpty()) null else (sumOf { it.toLong() }.toDouble() / size).toInt()
 }

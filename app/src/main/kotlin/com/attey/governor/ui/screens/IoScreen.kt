@@ -10,8 +10,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -75,16 +75,16 @@ private fun BlockCard(
             label = "scheduler",
             options = dev.availableSchedulers,
             selected = dev.scheduler,
-            enabled = dev.availableSchedulers.size > 1,
+            enabled = dev.availableSchedulers.size > 1 && dev.schedulerWritable,
             onSelect = onSetScheduler,
         )
         // Both take a plain integer and reject anything else, so a value that
         // will not parse is dropped here rather than sent to the kernel to be
         // refused with a message about a node the user never typed.
-        EditableRow("read_ahead_kb", dev.readAheadKb.toString()) { v ->
+        EditableRow("read_ahead_kb", dev.readAheadKb.toString(), dev.readAheadWritable) { v ->
             v.toLongOrNull()?.let(onSetReadAhead)
         }
-        EditableRow("nr_requests", dev.nrRequests.toString()) { v ->
+        EditableRow("nr_requests", dev.nrRequests.toString(), dev.nrRequestsWritable) { v ->
             v.toLongOrNull()?.let(onSetNrRequests)
         }
     }
@@ -111,7 +111,8 @@ private fun VirtualCollapsed(virtual: List<BlockDevice>) {
             )
             IconButton(onClick = { expanded = !expanded }) {
                 Icon(
-                    imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    imageVector = if (expanded) Icons.Filled.KeyboardArrowUp
+                    else Icons.Filled.KeyboardArrowDown,
                     contentDescription = if (expanded) "collapse" else "expand",
                 )
             }

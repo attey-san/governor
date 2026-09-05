@@ -30,8 +30,8 @@ import java.util.Locale
 fun GpuScreen(
     gpus: List<GpuDevice>,
     live: LiveStats,
-    onSetFreq: (min: Long, max: Long) -> Unit,
-    onSetGovernor: (governor: String) -> Unit,
+    onSetFreq: (path: String, min: Long, max: Long) -> Unit,
+    onSetGovernor: (path: String, governor: String) -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxWidth(),
@@ -41,10 +41,10 @@ fun GpuScreen(
         items(gpus) { gpu ->
             GpuCard(
                 gpu = gpu,
-                curFreq = if (live.gpuCurFreq > 0) live.gpuCurFreq else null,
-                busy = live.gpuBusyPercent,
-                onSetFreq = onSetFreq,
-                onSetGovernor = onSetGovernor,
+                curFreq = live.gpuCurFreq[gpu.path],
+                busy = live.gpuBusyPercent[gpu.path],
+                onSetFreq = { min, max -> onSetFreq(gpu.path, min, max) },
+                onSetGovernor = { governor -> onSetGovernor(gpu.path, governor) },
             )
         }
     }
@@ -80,7 +80,7 @@ private fun GpuCard(
             label = "min",
             steps = gpu.availableFreqs,
             value = min,
-            enabled = gpu.availableFreqs.isNotEmpty(),
+            enabled = gpu.availableFreqs.isNotEmpty() && gpu.minWritable && gpu.maxWritable,
             onChange = {
                 min = it
                 if (min > max) max = min
@@ -91,7 +91,7 @@ private fun GpuCard(
             label = "max",
             steps = gpu.availableFreqs,
             value = max,
-            enabled = gpu.availableFreqs.isNotEmpty(),
+            enabled = gpu.availableFreqs.isNotEmpty() && gpu.minWritable && gpu.maxWritable,
             onChange = {
                 max = it
                 if (max < min) min = max
@@ -102,7 +102,7 @@ private fun GpuCard(
             label = "governor",
             options = gpu.availableGovernors,
             selected = gpu.governor,
-            enabled = gpu.availableGovernors.isNotEmpty(),
+            enabled = gpu.availableGovernors.isNotEmpty() && gpu.governorWritable,
             onSelect = onSetGovernor,
         )
     }

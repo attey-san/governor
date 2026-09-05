@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!-- Lifecycle 2.11 requires API 37 and AGP 9.2; this project targets API 36. -->
+    <issue id="GradleDependency">
+        <ignore regexp="androidx\.lifecycle:lifecycle-(runtime|viewmodel)-compose" />
+    </issue>
+
+    <!-- Adaptive icons cannot be moved out of a v26-qualified resource directory. -->
+    <issue id="ObsoleteSdkInt">
+        <ignore path="src/main/res/mipmap-anydpi-v26" />
+    </issue>
+</lint>

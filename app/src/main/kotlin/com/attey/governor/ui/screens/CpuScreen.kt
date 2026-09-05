@@ -12,8 +12,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -63,6 +63,7 @@ fun CpuScreen(
                 policy = policy,
                 clusterLabel = labels.getOrNull(index) ?: "Cluster $index",
                 online = device.coresOnline,
+                hotpluggable = device.hotpluggableCores,
                 currentFreq = live.policyCurFreq[policy.id],
                 onSetFreq = onSetFreq,
                 onSetGovernor = onSetGovernor,
@@ -78,6 +79,7 @@ private fun CpuPolicyCard(
     policy: CpuPolicy,
     clusterLabel: String,
     online: Map<Int, Boolean>,
+    hotpluggable: Set<Int>,
     currentFreq: Long?,
     onSetFreq: (policyId: Int, min: Long, max: Long) -> Unit,
     onSetGovernor: (policyId: Int, governor: String) -> Unit,
@@ -103,7 +105,7 @@ private fun CpuPolicyCard(
             label = "min",
             steps = policy.availableFreqs,
             value = min,
-            enabled = policy.availableFreqs.isNotEmpty(),
+            enabled = policy.availableFreqs.isNotEmpty() && policy.minWritable && policy.maxWritable,
             onChange = {
                 min = it
                 if (min > max) max = min
@@ -114,7 +116,7 @@ private fun CpuPolicyCard(
             label = "max",
             steps = policy.availableFreqs,
             value = max,
-            enabled = policy.availableFreqs.isNotEmpty(),
+            enabled = policy.availableFreqs.isNotEmpty() && policy.minWritable && policy.maxWritable,
             onChange = {
                 max = it
                 if (max < min) min = max
@@ -137,7 +139,7 @@ private fun CpuPolicyCard(
             label = "governor",
             options = policy.availableGovernors,
             selected = policy.governor,
-            enabled = policy.availableGovernors.isNotEmpty(),
+            enabled = policy.availableGovernors.isNotEmpty() && policy.governorWritable,
             onSelect = { onSetGovernor(policy.id, it) },
         )
         TunablesSection(
@@ -147,6 +149,7 @@ private fun CpuPolicyCard(
         CoresSection(
             cpus = policy.cpus,
             online = online,
+            hotpluggable = hotpluggable,
             onSetCoreOnline = onSetCoreOnline,
         )
     }
@@ -174,7 +177,8 @@ private fun TunablesSection(
         Spacer(modifier = Modifier.weight(1f))
         IconButton(onClick = { expanded = !expanded }) {
             Icon(
-                imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                imageVector = if (expanded) Icons.Filled.KeyboardArrowUp
+                else Icons.Filled.KeyboardArrowDown,
                 contentDescription = if (expanded) "collapse" else "expand",
             )
         }
@@ -241,6 +245,7 @@ private fun TunableRow(
 private fun CoresSection(
     cpus: List<Int>,
     online: Map<Int, Boolean>,
+    hotpluggable: Set<Int>,
     onSetCoreOnline: (cpu: Int, online: Boolean) -> Unit,
 ) {
     if (cpus.isEmpty()) {
@@ -254,7 +259,7 @@ private fun CoresSection(
     )
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         cpus.forEach { cpu ->
-            val canOffline = cpu != 0
+            val canOffline = cpu != 0 && cpu in hotpluggable
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -284,4 +289,3 @@ private fun CoresSection(
         }
     }
 }
-

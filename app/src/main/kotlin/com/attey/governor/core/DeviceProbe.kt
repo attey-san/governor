@@ -22,6 +22,7 @@ object DeviceProbe {
         val kernel = shell.exec("uname -r").trim()
         val rootProvider = shell.exec("su -v 2>/dev/null").trim().ifEmpty { "unknown" }
         val policies = probePolicies(shell)
+        val cores = probeCores(shell, policies)
         DeviceModel(
             policies = policies,
             gpus = probeGpus(shell),
@@ -31,7 +32,8 @@ object DeviceProbe {
             vmTunables = probeVm(shell),
             boost = probeBoost(shell),
             zram = probeZram(shell),
-            coresOnline = probeCoreOnline(shell, policies),
+            coresOnline = cores.mapValues { it.value.value != "0" },
+            hotpluggableCores = cores.filterValues { it.isUsable }.keys,
             rootProvider = rootProvider,
             kernel = kernel,
         )
@@ -53,6 +55,12 @@ object DeviceProbe {
         )
         val read = shell.readAll(dirs.flatMap { d -> fields.map { "$d/$it" } }) +
             shell.readMultiline(dirs.map { "$it/stats/time_in_state" })
+        val controlModes = SysNode.modes(
+            shell,
+            dirs.flatMap { d ->
+                listOf("$d/scaling_min_freq", "$d/scaling_max_freq", "$d/scaling_governor")
+            },
+        )
 
         // Governor tunables live at policyN/<current governor>/, so the governor
         // has to be known before the directory can be listed. Two round trips,
@@ -92,20 +100,21 @@ object DeviceProbe {
                 governor = gov,
                 availableGovernors = read["$d/scaling_available_governors"]
                     ?.split(Regex("\\s+"))?.filter { it.isNotBlank() }.orEmpty(),
+                minWritable = SysNode.writable(controlModes["$d/scaling_min_freq"]),
+                maxWritable = SysNode.writable(controlModes["$d/scaling_max_freq"]),
+                governorWritable = SysNode.writable(controlModes["$d/scaling_governor"]),
                 governorTunables = nodes.filterKeys { it.startsWith("$d/$gov/") }
                     .mapKeys { it.key.substringAfterLast('/') },
             )
         }
     }
 
-    /** cpu -> online, for the per-core switches. cpu0 is always reported online. */
-    private fun probeCoreOnline(shell: RootShell, policies: List<CpuPolicy>): Map<Int, Boolean> {
+    /** cpu -> online node. cpu0 normally has no node and is always reported online. */
+    private fun probeCores(shell: RootShell, policies: List<CpuPolicy>): Map<Int, SysNode> {
         val cpus = policies.flatMap { it.cpus }.sorted()
-        val read = shell.readAll(cpus.map { "$CPU/cpu$it/online" })
+        val nodes = SysNode.probe(shell, cpus.map { "$CPU/cpu$it/online" })
         return cpus.associateWith { c ->
-            // cpu0 frequently has no online node at all because it cannot be taken
-            // down. Absent means present-and-running here, not unknown.
-            read["$CPU/cpu$c/online"]?.trim()?.let { it != "0" } ?: true
+            nodes["$CPU/cpu$c/online"] ?: SysNode("$CPU/cpu$c/online")
         }
     }
 
@@ -137,6 +146,10 @@ object DeviceProbe {
         val read = shell.readAll(
             dirs.flatMap { d -> fields.map { "$d/$it" } } + "/sys/class/kgsl/kgsl-3d0/gpu_model"
         )
+        val controlModes = SysNode.modes(
+            shell,
+            dirs.flatMap { d -> listOf("$d/min_freq", "$d/max_freq", "$d/governor") },
+        )
         return dirs.map { d ->
             val freqs = numbers(read["$d/available_frequencies"])
             GpuDevice(
@@ -150,6 +163,9 @@ object DeviceProbe {
                 governor = read["$d/governor"]?.trim().orEmpty(),
                 availableGovernors = read["$d/available_governors"]
                     ?.split(Regex("\\s+"))?.filter { it.isNotBlank() }.orEmpty(),
+                minWritable = SysNode.writable(controlModes["$d/min_freq"]),
+                maxWritable = SysNode.writable(controlModes["$d/max_freq"]),
+                governorWritable = SysNode.writable(controlModes["$d/governor"]),
             )
         }
     }
@@ -201,6 +217,20 @@ object DeviceProbe {
             "queue/rotational", "size",
         )
         val read = shell.readAll(names.flatMap { n -> fields.map { "/sys/block/$n/$it" } })
+        // Virtual queues are deliberately read-only in the UI. Stat only the
+        // real controls: alioth exposes 101 block devices but just seven are
+        // physical, so probing mode bits for all of them adds several seconds.
+        val editable = names.filterNot { VIRTUAL_BLOCK.containsMatchIn(it) }
+        val controlModes = SysNode.modes(
+            shell,
+            editable.flatMap { n ->
+                listOf(
+                    "/sys/block/$n/queue/scheduler",
+                    "/sys/block/$n/queue/read_ahead_kb",
+                    "/sys/block/$n/queue/nr_requests",
+                )
+            },
+        )
         val mounts = mountPoints(shell, disks)
 
         return names.map { n ->
@@ -211,8 +241,15 @@ object DeviceProbe {
                 scheduler = currentScheduler(sched),
                 availableSchedulers = sched.split(Regex("\\s+"))
                     .map { it.trim('[', ']') }.filter { it.isNotBlank() },
+                schedulerWritable = SysNode.writable(controlModes["/sys/block/$n/queue/scheduler"]),
                 readAheadKb = read["/sys/block/$n/queue/read_ahead_kb"]?.trim()?.toLongOrNull() ?: 0,
+                readAheadWritable = SysNode.writable(
+                    controlModes["/sys/block/$n/queue/read_ahead_kb"]
+                ),
                 nrRequests = read["/sys/block/$n/queue/nr_requests"]?.trim()?.toLongOrNull() ?: 0,
+                nrRequestsWritable = SysNode.writable(
+                    controlModes["/sys/block/$n/queue/nr_requests"]
+                ),
                 rotational = read["/sys/block/$n/queue/rotational"]?.trim() == "1",
                 isVirtual = VIRTUAL_BLOCK.containsMatchIn(n),
                 mountedAt = mounts[n],
@@ -390,11 +427,15 @@ object DeviceProbe {
             policyCurFreq = model.policies.mapNotNull { p ->
                 read["${p.path}/scaling_cur_freq"]?.trim()?.toLongOrNull()?.let { p.id to it }
             }.toMap(),
-            gpuCurFreq = model.gpus.firstOrNull()
-                ?.let { read["${it.path}/cur_freq"]?.trim()?.toLongOrNull() } ?: 0,
+            gpuCurFreq = model.gpus.mapNotNull { gpu ->
+                read["${gpu.path}/cur_freq"]?.trim()?.toLongOrNull()?.let { gpu.path to it }
+            }.toMap(),
             // "3 %" -- the value arrives with a space and a unit attached.
-            gpuBusyPercent = read["/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage"]
-                ?.filter { it.isDigit() }?.toIntOrNull(),
+            gpuBusyPercent = model.gpus.firstOrNull { it.path == "/sys/class/kgsl/kgsl-3d0/devfreq" }
+                ?.let { gpu ->
+                    read["/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage"]
+                        ?.filter { it.isDigit() }?.toIntOrNull()?.let { mapOf(gpu.path to it) }
+                }.orEmpty(),
             batteryMilliwatts = mW,
             batteryPercent = read["$bat/capacity"]?.trim()?.toIntOrNull(),
             batteryTempC = read["$bat/temp"]?.trim()?.toIntOrNull()?.let { it / 10f },
@@ -402,7 +443,10 @@ object DeviceProbe {
             // Vendors disagree on the sign convention -- this device reports
             // +423827 uA while charging, others report negative for the same thing
             // -- but every one of them fills in `status` correctly.
-            charging = read["$bat/status"]?.trim()?.startsWith("Charging", true) == true,
+            charging = read["$bat/status"]?.trim()?.let { status ->
+                status.equals("Charging", true) || status.equals("Full", true) ||
+                    status.equals("Not charging", true)
+            } == true,
             hottestZone = hottest,
             zoneTemps = temps,
             uptimeSeconds = read["/proc/uptime"]?.trim()?.substringBefore('.')?.toLongOrNull() ?: 0,
@@ -449,13 +493,17 @@ object DeviceProbe {
     private fun listDirs(shell: RootShell, dirs: List<String>): Map<String, List<String>> {
         if (dirs.isEmpty()) return emptyMap()
         val script = dirs.joinToString("\n") { d ->
-            "for f in '$d'/*; do [ -e \"\$f\" ] && printf '%s\\t%s\\n' '$d' \"\${f##*/}\"; done"
+            val q = shellQuote(d)
+            // `printf` is /system/bin/printf on Android, not a shell builtin.
+            // Forking it once per node turns this batch operation back into the
+            // slow path it exists to avoid.
+            "for f in $q/*; do [ -e \"\$f\" ] && echo $q'%%GOV%%'\"\${f##*/}\"; done"
         }
         val map = HashMap<String, MutableList<String>>()
         for (line in shell.exec(script).lineSequence()) {
-            val i = line.indexOf('\t')
+            val i = line.indexOf("%%GOV%%")
             if (i <= 0) continue
-            map.getOrPut(line.substring(0, i)) { mutableListOf() }.add(line.substring(i + 1))
+            map.getOrPut(line.substring(0, i)) { mutableListOf() }.add(line.substring(i + 7))
         }
         return map
     }

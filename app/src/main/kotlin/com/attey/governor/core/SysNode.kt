@@ -19,16 +19,7 @@ data class SysNode(
         /** Probes [paths] in one round trip, returning a node for each. */
         fun probe(shell: RootShell, paths: List<String>): Map<String, SysNode> {
             if (paths.isEmpty()) return emptyMap()
-            // One stat for every path, not one stat per path. `stat` is a real
-            // binary, so each invocation is a fork: 43 paths cost 784 ms one at a
-            // time and 29 ms batched, on the development device.
-            val modes = HashMap<String, String>(paths.size)
-            val statOut = shell.exec("stat -c '%n %a' ${paths.joinToString(" ") { "'$it'" }} 2>/dev/null")
-            for (line in statOut.lineSequence()) {
-                val i = line.lastIndexOf(' ')
-                if (i <= 0) continue
-                modes[line.substring(0, i)] = line.substring(i + 1).trim()
-            }
+            val modes = modes(shell, paths)
             val values = shell.readAll(paths)
             return paths.associateWith { p ->
                 val mode = modes[p].orEmpty()
@@ -40,6 +31,26 @@ data class SysNode(
                 )
             }
         }
+
+        /** Returns path -> mode for many nodes with one `stat` process. */
+        internal fun modes(shell: RootShell, paths: List<String>): Map<String, String> {
+            if (paths.isEmpty()) return emptyMap()
+            // One stat for every path, not one stat per path. `stat` is a real
+            // binary, so each invocation is a fork: 43 paths cost 784 ms one at a
+            // time and 29 ms batched, on the development device.
+            val modes = HashMap<String, String>(paths.size)
+            val statOut = shell.exec(
+                "stat -c '%n %a' ${paths.joinToString(" ") { shellQuote(it) }} 2>/dev/null"
+            )
+            for (line in statOut.lineSequence()) {
+                val i = line.lastIndexOf(' ')
+                if (i <= 0) continue
+                modes[line.substring(0, i)] = line.substring(i + 1).trim()
+            }
+            return modes
+        }
+
+        internal fun writable(mode: String?): Boolean = ownerWritable(mode.orEmpty())
 
         /**
          * Writability from the mode bits, not from `[ -w ]`.
@@ -85,6 +96,25 @@ object Writer {
 
     private fun isDenied(path: String): Boolean = DENY.any { it.containsMatchIn(path) }
 
+    /** The only kernel surfaces Governor is allowed to change. */
+    private val ALLOW = listOf(
+        Regex("^/sys/devices/system/cpu/cpufreq/policy\\d+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)?$"),
+        Regex("^/sys/devices/system/cpu/cpu\\d+/online$"),
+        Regex("^/sys/devices/system/cpu/cpu_boost/[A-Za-z0-9_.-]+$"),
+        Regex("^/sys/module/cpu_boost/parameters/[A-Za-z0-9_.-]+$"),
+        Regex("^/sys/class/kgsl/kgsl-3d0/devfreq/[A-Za-z0-9_.-]+$"),
+        Regex("^/sys/class/devfreq/[A-Za-z0-9_.:@,+-]+/[A-Za-z0-9_.-]+$"),
+        Regex("^/sys/block/[A-Za-z0-9_.-]+/queue/[A-Za-z0-9_.-]+$"),
+        Regex("^/sys/block/zram0/comp_algorithm$"),
+        Regex("^/proc/sys/vm/[A-Za-z0-9_.-]+$"),
+    )
+
+    internal fun isAllowedPath(path: String): Boolean =
+        !isDenied(path) && ALLOW.any { it.matches(path) }
+
+    private fun invalidValue(value: String): Boolean =
+        value.any(Char::isISOControl)
+
     /**
      * Writes [value] to [path] and reads it back. sysfs frequently accepts a
      * write and then stores something else -- a clamped frequency, or nothing at
@@ -92,20 +122,25 @@ object Writer {
      */
     fun write(shell: RootShell, path: String, value: String): WriteResult {
         if (isDenied(path)) return WriteResult.Refused("thermal nodes are not writable by this app")
-        // Values reach the shell inside single quotes. A value containing one --
-        // typed into a tunable field by hand -- would close the quote and leave
-        // the persistent shell waiting for input that never comes, hanging every
-        // later command. Newlines split the command outright.
-        if (value.any { it == '\'' || it == '\n' || it == '\r' }) {
-            return WriteResult.Refused("value contains a quote or a line break")
+        if (!isAllowedPath(path)) return WriteResult.Refused("path is outside Governor's write allowlist")
+        // A control character from a damaged profile can split or terminate the
+        // shell command. Quotes are safe because shellQuote encodes them.
+        if (invalidValue(value)) {
+            return WriteResult.Refused("value contains a control character")
         }
         // No trailing whitespace: at least one kernel interface (cpu_boost's
         // input_boost_freq) rejects a value written with a trailing space and
         // silently keeps the old one.
         val v = value.trim()
-        shell.exec("printf '%s' '$v' > '$path' 2>/dev/null")
-        val back = shell.exec("cat '$path' 2>/dev/null").trim()
+        shell.exec("print -nr -- ${shellQuote(v)} > ${shellQuote(path)} 2>/dev/null")
+        val back = shell.readAll(listOf(path))[path].orEmpty().trim()
         return if (accepted(back, v)) WriteResult.Ok else WriteResult.Rejected(v, back)
+    }
+
+    /** A guarded write for generated boot scripts, or null for unsafe input. */
+    internal fun shellWriteLine(path: String, value: String): String? {
+        if (!isAllowedPath(path) || invalidValue(value)) return null
+        return "[ -e ${shellQuote(path)} ] && print -nr -- ${shellQuote(value.trim())} > ${shellQuote(path)}"
     }
 
     /**
@@ -117,9 +152,9 @@ object Writer {
      * is the worst answer available: the write worked and the app says it did
      * not.
      */
-    private fun accepted(back: String, wanted: String): Boolean {
+    internal fun accepted(back: String, wanted: String): Boolean {
         if (back == wanted) return true
-        val tokens = back.split(Regex("\\s+")).map { it.trim('[', ']') }
-        return tokens.contains(wanted)
+        val active = Regex("(?:^|\\s)\\[([^]]+)](?:\\s|$)").find(back)?.groupValues?.get(1)
+        return active == wanted
     }
 }

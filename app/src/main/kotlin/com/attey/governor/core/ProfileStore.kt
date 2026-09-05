@@ -5,6 +5,13 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
+internal data class AppOverrideState(
+    val packageName: String,
+    val restore: Profile,
+    /** False while the restore point is durable but the app profile may be only partly applied. */
+    val applied: Boolean,
+)
+
 /**
  * Profiles and triggers on disk, as JSON in the app's own files directory.
  *
@@ -15,6 +22,7 @@ class ProfileStore(context: Context) {
 
     private val profileFile = File(context.filesDir, "profiles.json")
     private val triggerFile = File(context.filesDir, "triggers.json")
+    private val appOverrideFile = File(context.filesDir, "app-override.json")
 
     /**
      * Which profile the quick-settings tile last applied.
@@ -27,25 +35,56 @@ class ProfileStore(context: Context) {
 
     fun loadProfiles(): List<Profile> = read(profileFile) { toProfile(it) }
 
-    fun saveProfiles(profiles: List<Profile>) =
+    fun saveProfiles(profiles: List<Profile>): Boolean =
         write(profileFile, profiles.map { it.toJson() })
 
     fun loadTriggers(): List<Trigger> = read(triggerFile) { toTrigger(it) }
 
     fun loadActiveProfile(): String? =
-        runCatching { activeFile.readText().trim().ifEmpty { null } }.getOrNull()
+        readableFile(activeFile)?.let { source ->
+            runCatching { source.readText().trim().ifEmpty { null } }.getOrNull()
+        }
 
-    fun saveActiveProfile(name: String) {
-        runCatching { activeFile.writeText(name) }
+    fun saveActiveProfile(name: String): Boolean = writeTextAtomically(activeFile, name)
+
+    fun clearActiveProfile(): Boolean = clearAtomicallyWrittenFile(activeFile)
+
+    /** The pre-app snapshot must survive a foreground-service process restart. */
+    internal fun loadAppOverride(): AppOverrideState? {
+        val source = readableFile(appOverrideFile) ?: return null
+        return runCatching {
+            val root = JSONObject(source.readText())
+            val packageName = root.optString("packageName").ifEmpty {
+                return@runCatching null
+            }
+            val profile = root.optJSONObject("restore")?.let(::toProfile)
+                ?: return@runCatching null
+            AppOverrideState(packageName, profile, root.optBoolean("applied", true))
+        }.getOrNull()
     }
 
-    fun saveTriggers(triggers: List<Trigger>) =
+    internal fun saveAppOverride(
+        packageName: String,
+        restore: Profile,
+        applied: Boolean,
+    ): Boolean {
+        val root = JSONObject().apply {
+            put("packageName", packageName)
+            put("restore", restore.toJson())
+            put("applied", applied)
+        }
+        return writeTextAtomically(appOverrideFile, root.toString(2))
+    }
+
+    internal fun clearAppOverride(): Boolean = clearAtomicallyWrittenFile(appOverrideFile)
+
+    fun saveTriggers(triggers: List<Trigger>): Boolean =
         write(triggerFile, triggers.map { it.toJson() })
 
     private fun <T> read(file: File, parse: (JSONObject) -> T?): List<T> {
-        if (!file.exists()) return emptyList()
+        val source = readableFile(file) ?: return emptyList()
         return runCatching {
-            val array = JSONArray(file.readText())
+            val array = JSONArray(source.readText())
             (0 until array.length()).mapNotNull { parse(array.getJSONObject(it)) }
         }.getOrDefault(emptyList())
     }
@@ -59,18 +98,35 @@ class ProfileStore(context: Context) {
      * inside one directory is atomic, so the file is either the old one or the
      * new one.
      */
-    private fun write(file: File, objects: List<JSONObject>) {
-        runCatching {
-            val array = JSONArray()
-            objects.forEach { array.put(it) }
-            val tmp = File(file.parentFile, "${file.name}.tmp")
-            tmp.writeText(array.toString(2))
-            if (!tmp.renameTo(file)) {
-                file.writeText(tmp.readText())
-                tmp.delete()
-            }
-        }
+    private fun write(file: File, objects: List<JSONObject>): Boolean {
+        val array = JSONArray()
+        objects.forEach { array.put(it) }
+        return writeTextAtomically(file, array.toString(2))
     }
+
+    private fun writeTextAtomically(file: File, text: String): Boolean =
+        synchronized(FILE_WRITE_LOCK) {
+            runCatching {
+                val tmp = pendingFile(file)
+                tmp.writeText(text)
+                check(tmp.renameTo(file)) { "could not replace ${file.name}" }
+            }.isSuccess
+        }
+
+    /** A crash before rename leaves a complete temp file, which is still usable. */
+    private fun readableFile(file: File): File? = synchronized(FILE_WRITE_LOCK) {
+        val tmp = pendingFile(file)
+        if (!file.exists() && tmp.exists()) runCatching { tmp.renameTo(file) }
+        file.takeIf { it.exists() } ?: tmp.takeIf { it.exists() }
+    }
+
+    private fun clearAtomicallyWrittenFile(file: File): Boolean = synchronized(FILE_WRITE_LOCK) {
+        val tmp = pendingFile(file)
+        if (tmp.exists() && !tmp.delete()) return@synchronized false
+        !file.exists() || file.delete()
+    }
+
+    private fun pendingFile(file: File) = File(file.parentFile, "${file.name}.tmp")
 
     // --- Mapping
 
@@ -83,8 +139,6 @@ class ProfileStore(context: Context) {
         gpuMax?.let { put("gpuMax", it) }
         gpuGovernor?.let { put("gpuGovernor", it) }
         put("tunables", JSONObject(tunables))
-        put("vm", JSONObject(vm))
-        put("io", JSONObject(io))
     }
 
     private fun toProfile(o: JSONObject): Profile? {
@@ -95,12 +149,10 @@ class ProfileStore(context: Context) {
             policyMax = o.optJSONObject("policyMax").toLongMap(),
             governors = o.optJSONObject("governors").toStringMap()
                 .mapKeys { it.key.toIntOrNull() ?: -1 }.filterKeys { it >= 0 },
-            gpuMin = if (o.has("gpuMin")) o.optLong("gpuMin") else null,
-            gpuMax = if (o.has("gpuMax")) o.optLong("gpuMax") else null,
-            gpuGovernor = if (o.has("gpuGovernor")) o.optString("gpuGovernor") else null,
+            gpuMin = o.longOrNull("gpuMin"),
+            gpuMax = o.longOrNull("gpuMax"),
+            gpuGovernor = o.stringOrNull("gpuGovernor"),
             tunables = o.optJSONObject("tunables").toStringMap(),
-            vm = o.optJSONObject("vm").toStringMap(),
-            io = o.optJSONObject("io").toStringMap(),
         )
     }
 
@@ -132,14 +184,32 @@ class ProfileStore(context: Context) {
 
     private fun JSONObject?.toStringMap(): Map<String, String> {
         if (this == null) return emptyMap()
-        return keys().asSequence().associateWith { optString(it) }
+        return keys().asSequence().mapNotNull { key ->
+            val value = opt(key).takeUnless { it == null || it == JSONObject.NULL }
+                ?: return@mapNotNull null
+            key to value.toString()
+        }.toMap()
     }
 
     private fun JSONObject?.toLongMap(): Map<Int, Long> {
         if (this == null) return emptyMap()
         return keys().asSequence().mapNotNull { k ->
             val id = k.toIntOrNull() ?: return@mapNotNull null
-            id to optLong(k)
+            if (id < 0) return@mapNotNull null
+            val value = opt(k).takeUnless { it == null || it == JSONObject.NULL }
+                ?.toString()?.toLongOrNull() ?: return@mapNotNull null
+            id to value
         }.toMap()
+    }
+
+    private fun JSONObject.longOrNull(key: String): Long? =
+        opt(key).takeUnless { it == null || it == JSONObject.NULL }
+            ?.toString()?.toLongOrNull()
+
+    private fun JSONObject.stringOrNull(key: String): String? =
+        opt(key).takeUnless { it == null || it == JSONObject.NULL }?.toString()
+
+    private companion object {
+        val FILE_WRITE_LOCK = Any()
     }
 }

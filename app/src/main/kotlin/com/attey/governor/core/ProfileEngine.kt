@@ -1,5 +1,7 @@
 package com.attey.governor.core
 
+import kotlinx.coroutines.sync.withLock
+
 /**
  * Turns a [Profile] into writes, and the current device state back into a Profile.
  */
@@ -15,62 +17,51 @@ object ProfileEngine {
      * them in the other order puts the values into the previous governor's
      * directory, where they sit looking correct and doing nothing.
      */
-    fun apply(shell: RootShell, model: DeviceModel, profile: Profile): List<String> {
-        val rejections = mutableListOf<String>()
+    suspend fun apply(shell: RootShell, model: DeviceModel, profile: Profile): List<String> =
+        kernelWriteMutex.withLock {
+            val rejections = LinkedHashMap<String, String>()
 
-        fun put(path: String, value: String) {
-            when (val r = Writer.write(shell, path, value)) {
-                WriteResult.Ok -> Unit
-                is WriteResult.Refused -> rejections += "${path.substringAfterLast('/')}: ${r.reason}"
-                is WriteResult.Rejected ->
-                    rejections += "${path.substringAfterLast('/')}: wanted ${r.wanted}, kept ${r.actual}"
+            fun put(path: String, value: String) {
+                when (val r = Writer.write(shell, path, value)) {
+                    WriteResult.Ok -> rejections.remove(path)
+                    is WriteResult.Refused ->
+                        rejections[path] = "${path.substringAfterLast('/')}: ${r.reason}"
+                    is WriteResult.Rejected ->
+                        rejections[path] =
+                            "${path.substringAfterLast('/')}: wanted ${r.wanted}, kept ${r.actual}"
+                }
             }
-        }
 
-        for (policy in model.policies) {
-            profile.governors[policy.id]?.let { put(policy.govNode, it) }
-
-            val min = profile.policyMin[policy.id]
-            val max = profile.policyMax[policy.id]
-            if (max != null && max >= policy.scalingMax) {
-                put(policy.maxNode, max.toString())
-                min?.let { put(policy.minNode, it.toString()) }
-            } else {
-                min?.let { put(policy.minNode, it.toString()) }
-                max?.let { put(policy.maxNode, it.toString()) }
+            for (policy in model.policies) {
+                profile.governors[policy.id]?.let { put(policy.govNode, it) }
+                frequencyWindowWrites(
+                    policy.minNode,
+                    policy.maxNode,
+                    profile.policyMin[policy.id],
+                    profile.policyMax[policy.id],
+                ).forEach { (path, value) -> put(path, value) }
             }
-        }
 
-        model.gpus.firstOrNull()?.let { gpu ->
-            profile.gpuGovernor?.let { put("${gpu.path}/governor", it) }
-            val max = profile.gpuMax
-            val min = profile.gpuMin
-            if (max != null && max >= gpu.maxFreq) {
-                put("${gpu.path}/max_freq", max.toString())
-                min?.let { put("${gpu.path}/min_freq", it.toString()) }
-            } else {
-                min?.let { put("${gpu.path}/min_freq", it.toString()) }
-                max?.let { put("${gpu.path}/max_freq", it.toString()) }
+            model.gpus.firstOrNull()?.let { gpu ->
+                profile.gpuGovernor?.let { put("${gpu.path}/governor", it) }
+                frequencyWindowWrites(
+                    "${gpu.path}/min_freq",
+                    "${gpu.path}/max_freq",
+                    profile.gpuMin,
+                    profile.gpuMax,
+                ).forEach { (path, value) -> put(path, value) }
             }
-        }
 
-        profile.tunables.forEach { (path, value) -> put(path, value) }
-        profile.vm.forEach { (name, value) -> put("/proc/sys/vm/$name", value) }
-        profile.io.forEach { (key, value) ->
-            val device = key.substringBefore('/')
-            val knob = key.substringAfter('/')
-            put("/sys/block/$device/queue/$knob", value)
+            profile.tunables.forEach { (path, value) -> put(path, value) }
+            rejections.values.toList()
         }
-        return rejections
-    }
 
     /**
      * The current state as a profile.
      *
-     * Only captures what a profile is allowed to restore. vm and I/O are left out
-     * on purpose: snapshotting all 43 vm knobs would make every profile a
-     * whole-system image, and applying one would then stamp over settings the user
-     * never chose to include.
+     * Only captures what a profile is allowed to restore. vm and I/O are left out:
+     * snapshotting every visible knob would make every profile a whole-system
+     * image and stamp over settings the user never chose to include.
      */
     fun snapshot(model: DeviceModel, name: String) = Profile(
         name = name,
@@ -80,9 +71,9 @@ object ProfileEngine {
         gpuMin = model.gpus.firstOrNull()?.minFreq,
         gpuMax = model.gpus.firstOrNull()?.maxFreq,
         gpuGovernor = model.gpus.firstOrNull()?.governor,
-        tunables = model.policies.flatMap { p ->
-            p.governorTunables.values.filter { it.isUsable }.map { it.path to it.value }
-        }.toMap(),
+        tunables = (
+            model.policies.flatMap { p -> p.governorTunables.values } + model.boost.values
+        ).filter { it.isUsable }.associate { it.path to it.value },
     )
 
     /**
@@ -94,26 +85,82 @@ object ProfileEngine {
         val writes = mutableListOf<Pair<String, String>>()
         for (policy in model.policies) {
             profile.governors[policy.id]?.let { writes += policy.govNode to it }
-            profile.policyMax[policy.id]?.let { writes += policy.maxNode to it.toString() }
-            profile.policyMin[policy.id]?.let { writes += policy.minNode to it.toString() }
+            writes += frequencyWindowWrites(
+                policy.minNode,
+                policy.maxNode,
+                profile.policyMin[policy.id],
+                profile.policyMax[policy.id],
+            )
         }
         model.gpus.firstOrNull()?.let { gpu ->
             profile.gpuGovernor?.let { writes += "${gpu.path}/governor" to it }
-            profile.gpuMax?.let { writes += "${gpu.path}/max_freq" to it.toString() }
-            profile.gpuMin?.let { writes += "${gpu.path}/min_freq" to it.toString() }
+            writes += frequencyWindowWrites(
+                "${gpu.path}/min_freq",
+                "${gpu.path}/max_freq",
+                profile.gpuMin,
+                profile.gpuMax,
+            )
         }
         profile.tunables.forEach { (p, v) -> writes += p to v }
-        profile.vm.forEach { (n, v) -> writes += "/proc/sys/vm/$n" to v }
-        profile.io.forEach { (k, v) ->
-            writes += "/sys/block/${k.substringBefore('/')}/queue/${k.substringAfter('/')}" to v
+        // This script runs as uid 0 at every boot. Treat a profile loaded from
+        // disk as untrusted and use the same allowlist and quoting as live writes.
+        for ((path, value) in writes) appendLine(
+            requireNotNull(Writer.shellWriteLine(path, value)) {
+                "unsafe profile setting: $path"
+            }
+        )
+    }
+
+    /**
+     * A max/min/max sequence reaches any valid window regardless of the current
+     * one. The first max widens an upper bound when needed; if it is below the
+     * current minimum it may be clamped, then succeeds after the minimum moves.
+     */
+    internal fun frequencyWindowWrites(
+        minPath: String,
+        maxPath: String,
+        min: Long?,
+        max: Long?,
+    ): List<Pair<String, String>> = when {
+        min != null && max != null -> listOf(
+            maxPath to max.toString(),
+            minPath to min.toString(),
+            maxPath to max.toString(),
+        )
+        min != null -> listOf(minPath to min.toString())
+        max != null -> listOf(maxPath to max.toString())
+        else -> emptyList()
+    }
+
+    /** Orders saved bounds so a rollback works from either side of the old window. */
+    internal fun restorationWrites(restore: Map<String, String>): List<Pair<String, String>> {
+        val out = mutableListOf<Pair<String, String>>()
+        val handled = HashSet<String>()
+        for ((path, value) in restore) {
+            if (!handled.add(path)) continue
+            val pair = when {
+                path.endsWith("/scaling_min_freq") ->
+                    path.removeSuffix("/scaling_min_freq") + "/scaling_max_freq"
+                path.endsWith("/scaling_max_freq") ->
+                    path.removeSuffix("/scaling_max_freq") + "/scaling_min_freq"
+                path.endsWith("/min_freq") -> path.removeSuffix("/min_freq") + "/max_freq"
+                path.endsWith("/max_freq") -> path.removeSuffix("/max_freq") + "/min_freq"
+                else -> null
+            }
+            if (pair == null || pair !in restore) {
+                out += path to value
+                continue
+            }
+            handled += pair
+            val pathIsMin = path.endsWith("/scaling_min_freq") || path.endsWith("/min_freq")
+            val minPath = if (pathIsMin) path else pair
+            val maxPath = if (pathIsMin) pair else path
+            out += listOf(
+                maxPath to restore.getValue(maxPath),
+                minPath to restore.getValue(minPath),
+                maxPath to restore.getValue(maxPath),
+            )
         }
-        // Same quoting rule as Writer.write, and for a harder reason: this script
-        // runs as uid 0 at every boot. A value carrying a quote would close the
-        // one below it and hand the rest of the line to the shell as commands.
-        // A profile that came off disk, or off another phone, is not trusted.
-        for ((path, value) in writes) {
-            if (value.any { it == '\'' || it == '\n' || it == '\r' }) continue
-            appendLine("[ -e '$path' ] && echo '$value' > '$path'")
-        }
+        return out
     }
 }

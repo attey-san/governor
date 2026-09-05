@@ -30,9 +30,10 @@ sealed interface UiState {
 data class LiveStats(
     /** policy id -> current kHz, from scaling_cur_freq. */
     val policyCurFreq: Map<Int, Long> = emptyMap(),
-    val gpuCurFreq: Long = 0,
+    /** devfreq path -> current Hz. */
+    val gpuCurFreq: Map<String, Long> = emptyMap(),
     /** 0..100, or null if the kernel does not expose it. */
-    val gpuBusyPercent: Int? = null,
+    val gpuBusyPercent: Map<String, Int> = emptyMap(),
     /**
      * Battery draw in milliwatts, positive when discharging. Computed as
      * current_now x voltage_now -- never read from power_now, which is wrong by
@@ -41,6 +42,7 @@ data class LiveStats(
     val batteryMilliwatts: Int? = null,
     val batteryPercent: Int? = null,
     val batteryTempC: Float? = null,
+    /** True when battery status shows external power, even if the pack is full. */
     val charging: Boolean = false,
     /** Hottest populated thermal zone, for the header. */
     val hottestZone: Pair<String, Float>? = null,
@@ -63,6 +65,8 @@ data class PendingRevert(
     val secondsLeft: Int,
     /** path -> value to restore if the user does not confirm. */
     val restore: Map<String, String>,
+    /** Marker owned by the detached root-side rollback process. */
+    val guardToken: String,
     /** The countdown this started from, so the bar does not carry its own copy. */
     val totalSeconds: Int = secondsLeft,
 ) {

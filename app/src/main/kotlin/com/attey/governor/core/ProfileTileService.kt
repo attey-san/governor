@@ -9,6 +9,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /**
  * A quick-settings tile that cycles through saved profiles.
@@ -29,34 +32,47 @@ class ProfileTileService : TileService() {
 
     override fun onClick() {
         super.onClick()
-        val store = ProfileStore(this)
-        val profiles = store.loadProfiles()
-        if (profiles.isEmpty()) {
-            render()
-            return
-        }
-        val next = profiles[(profiles.indexOfFirst { it.name == store.loadActiveProfile() } + 1)
-            .mod(profiles.size)]
-
-        // Optimistic label: the tile has a couple of hundred milliseconds before
-        // the panel redraws, and a root probe does not fit in that.
-        store.saveActiveProfile(next.name)
-        render()
-
         applyScope.launch {
-            val shell = RootShell.get() ?: return@launch
-            val model = DeviceProbe.probe(shell)
-            ProfileEngine.apply(shell, model, next)
+            applyMutex.withLock {
+                val store = ProfileStore(this@ProfileTileService)
+                val profiles = store.loadProfiles()
+                if (profiles.isEmpty()) {
+                    withContext(Dispatchers.Main) { render() }
+                    return@withLock
+                }
+                val next = profiles[
+                    (profiles.indexOfFirst { it.name == store.loadActiveProfile() } + 1)
+                        .mod(profiles.size)
+                ]
+                withContext(Dispatchers.Main) { render("applying ${next.name}") }
+                val result = runCatching {
+                    val shell = RootShell.get() ?: error("root unavailable")
+                    val model = DeviceProbe.probe(shell)
+                    ProfileEngine.apply(shell, model, next)
+                }
+                val status = result.fold(
+                    onSuccess = { declined ->
+                        if (declined.isEmpty()) {
+                            if (store.saveActiveProfile(next.name)) next.name
+                            else "applied; active marker not saved"
+                        } else {
+                            "${declined.size} setting(s) declined"
+                        }
+                    },
+                    onFailure = { it.message ?: "apply failed" },
+                )
+                withContext(Dispatchers.Main) { render(status) }
+            }
         }
     }
 
-    private fun render() {
+    private fun render(statusOverride: String? = null) {
         val tile = qsTile ?: return
         val store = ProfileStore(this)
         val active = store.loadActiveProfile()
         val hasProfiles = store.loadProfiles().isNotEmpty()
 
-        val status = when {
+        val status = statusOverride ?: when {
             !hasProfiles -> "no profiles"
             active.isNullOrEmpty() -> "tap to apply"
             else -> active
@@ -87,5 +103,6 @@ class ProfileTileService : TileService() {
          * two and has to finish.
          */
         val applyScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val applyMutex = Mutex()
     }
 }

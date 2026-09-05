@@ -19,14 +19,10 @@ data class Profile(
     val gpuGovernor: String? = null,
     /** Absolute path -> value, for governor tunables and input boost. */
     val tunables: Map<String, String> = emptyMap(),
-    /** Bare name under /proc/sys/vm -> value. */
-    val vm: Map<String, String> = emptyMap(),
-    /** "sda/scheduler", "sda/read_ahead_kb" -> value. */
-    val io: Map<String, String> = emptyMap(),
 ) {
     val settingCount: Int
         get() = policyMin.size + policyMax.size + governors.size + tunables.size +
-            vm.size + io.size + listOfNotNull(gpuMin, gpuMax, gpuGovernor).size
+            listOfNotNull(gpuMin, gpuMax, gpuGovernor).size
 }
 
 enum class TriggerType(

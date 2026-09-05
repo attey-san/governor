@@ -14,6 +14,9 @@ import android.content.Intent
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
+        // A reboot resets live kernel state, so a pre-app snapshot from the old
+        // boot must never be restored over it.
+        ProfileStore(context).clearAppOverride()
         TriggerService.sync(context)
     }
 }

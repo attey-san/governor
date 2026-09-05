@@ -11,6 +11,7 @@ import android.content.IntentFilter
 import android.os.BatteryManager
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -19,6 +20,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -51,6 +54,8 @@ class TriggerService : Service() {
     @Volatile private var appPollJob: Job? = null
     @Volatile private var screenOn = true
     @Volatile private var currentApp: String? = null
+    @Volatile private var appOverrideApplied = false
+    private val appStateMutex = Mutex()
 
     /**
      * What was in effect before an app trigger took over.
@@ -67,6 +72,12 @@ class TriggerService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        screenOn = getSystemService(PowerManager::class.java)?.isInteractive == true
+        store.loadAppOverride()?.let { saved ->
+            currentApp = saved.packageName
+            beforeApp = saved.restore
+            appOverrideApplied = saved.applied
+        }
         startForeground(NOTIFICATION_ID, notification("watching"))
         scope.launch {
             RootShell.get()?.let { model = DeviceProbe.probe(it) }
@@ -92,13 +103,53 @@ class TriggerService : Service() {
         return START_STICKY
     }
 
+    @Synchronized
     private fun reload() {
         triggers = store.loadTriggers().filter { it.enabled }
         profiles = store.loadProfiles()
-        armed.clear()
-        triggers.forEach { armed[it.id] = true }
+        val activeIds = triggers.mapTo(HashSet()) { it.id }
+        armed.keys.retainAll(activeIds)
+        triggers.forEach { armed.putIfAbsent(it.id, true) }
         notify(if (triggers.isEmpty()) "no triggers set" else "${triggers.size} trigger(s) armed")
+        val activeApp = currentApp
+        if (beforeApp != null && (!screenOn || activeApp == null ||
+                triggers.none {
+                    it.type == TriggerType.APP_FOREGROUND && it.packageName == activeApp
+                } || !UsageAccess.hasAccess(this))
+        ) {
+            scope.launch { restoreOrphanedAppOverride() }
+        }
         syncAppPoll()
+    }
+
+    /** Restores an app override whose trigger was disabled or lost permission. */
+    private suspend fun restoreOrphanedAppOverride() {
+        appStateMutex.withLock {
+            if (!restoreAppOverrideLocked("restored settings after app trigger stopped")) return
+        }
+        if (triggers.isEmpty()) stopSelf()
+    }
+
+    /** Caller owns [appStateMutex]. */
+    private suspend fun restoreAppOverrideLocked(successMessage: String): Boolean {
+        val restore = beforeApp ?: return true
+        val shell = RootShell.get() ?: return false
+        val device = DeviceProbe.probe(shell).also { model = it }
+        val declined = ProfileEngine.apply(shell, device, restore)
+        if (declined.isEmpty()) {
+            if (!store.clearAppOverride()) {
+                notify("settings restored, but the app-trigger marker could not be cleared")
+                return false
+            }
+            beforeApp = null
+            currentApp = null
+            appOverrideApplied = false
+            notify(successMessage)
+            return true
+        } else {
+            notify("app-trigger restore failed: ${declined.size} setting(s) declined")
+            return false
+        }
     }
 
     /**
@@ -125,9 +176,12 @@ class TriggerService : Service() {
         }
     }
 
-    private suspend fun checkForegroundApp() {
+    private suspend fun checkForegroundApp(): Unit = appStateMutex.withLock {
         val pkg = UsageAccess.foregroundPackage(this, APP_POLL_MS * 2) ?: return
-        if (pkg == currentApp) return
+        if (beforeApp != null && !appOverrideApplied &&
+            !restoreAppOverrideLocked("recovered an interrupted app-trigger change")
+        ) return
+        if (pkg == currentApp && (beforeApp == null || appOverrideApplied)) return
         val previous = currentApp
 
         val entering = triggers.firstOrNull {
@@ -137,30 +191,41 @@ class TriggerService : Service() {
             it.type == TriggerType.APP_FOREGROUND && it.packageName == previous
         }
 
-        // Not before this point. Root can be momentarily unavailable, and a
-        // currentApp already moved on would make the next poll see no change and
-        // skip the trigger permanently.
-        val shell = RootShell.get() ?: return
-        val device = model ?: DeviceProbe.probe(shell).also { model = it }
-        currentApp = pkg
-
-        if (leaving && entering == null) {
-            beforeApp?.let {
-                ProfileEngine.apply(shell, device, it)
-                notify("restored settings from before ${previous}")
-            }
-            beforeApp = null
+        if (leaving && !restoreAppOverrideLocked("restored settings from before $previous")) return
+        if (entering == null) {
+            currentApp = pkg
             return
         }
-        if (entering != null) {
-            if (beforeApp == null) beforeApp = ProfileEngine.snapshot(device, "before app")
-            fire(entering)
+
+        // This snapshot has to describe the transition, not service startup.
+        val shell = RootShell.get() ?: return
+        val device = DeviceProbe.probe(shell).also { model = it }
+        val restore = beforeApp ?: ProfileEngine.snapshot(device, "before app")
+        // Persist a pending state before touching the kernel. If the process dies
+        // in between, the next service instance restores and safely retries.
+        if (!store.saveAppOverride(pkg, restore, applied = false)) {
+            notify("could not save the pre-app restore point; profile not applied")
+            return
+        }
+        beforeApp = restore
+        appOverrideApplied = false
+        if (fire(entering)) {
+            currentApp = pkg
+            appOverrideApplied = true
+            store.saveAppOverride(pkg, restore, applied = true)
+        } else if (restoreAppOverrideLocked(
+                "profile ${entering.profileName} was incomplete; restored prior settings"
+            )
+        ) {
+            // Do not retry a profile the kernel declined every ten seconds. It
+            // becomes eligible again after the app leaves and re-enters.
+            currentApp = pkg
         }
     }
 
     private fun handle(intent: Intent) {
         when (intent.action) {
-            Intent.ACTION_SCREEN_ON -> { screenOn = true; syncAppPoll() }
+            Intent.ACTION_SCREEN_ON -> screenOn = true
             Intent.ACTION_SCREEN_OFF -> { screenOn = false; syncAppPoll() }
         }
         val matches = when (intent.action) {
@@ -171,8 +236,21 @@ class TriggerService : Service() {
             Intent.ACTION_BATTERY_CHANGED -> thresholdMatches(intent)
             else -> emptyList()
         }
-        if (matches.isEmpty()) return
-        scope.launch { matches.forEach { fire(it) } }
+        val screenTransition = intent.action == Intent.ACTION_SCREEN_ON ||
+            intent.action == Intent.ACTION_SCREEN_OFF
+        if (matches.isEmpty() && !screenTransition) return
+        scope.launch {
+            if (intent.action == Intent.ACTION_SCREEN_OFF) {
+                val restored = appStateMutex.withLock {
+                    restoreAppOverrideLocked("restored app-trigger settings when the screen turned off")
+                }
+                if (!restored) return@launch
+            }
+            matches.forEach { trigger ->
+                if (!fire(trigger) && trigger.type.needsThreshold) armed[trigger.id] = true
+            }
+            if (intent.action == Intent.ACTION_SCREEN_ON) syncAppPoll()
+        }
     }
 
     private fun thresholdMatches(intent: Intent): List<Trigger> {
@@ -214,15 +292,17 @@ class TriggerService : Service() {
         return out
     }
 
-    private suspend fun fire(trigger: Trigger) {
-        val shell = RootShell.get() ?: return
+    private suspend fun fire(trigger: Trigger): Boolean {
+        val shell = RootShell.get() ?: return false
         val device = model ?: DeviceProbe.probe(shell).also { model = it }
-        val profile = profiles.firstOrNull { it.name == trigger.profileName } ?: return
+        val profile = profiles.firstOrNull { it.name == trigger.profileName } ?: return false
         val rejections = ProfileEngine.apply(shell, device, profile)
+        if (rejections.isEmpty()) store.saveActiveProfile(profile.name)
         notify(
             if (rejections.isEmpty()) "applied ${profile.name}"
             else "applied ${profile.name}, ${rejections.size} setting(s) declined"
         )
+        return rejections.isEmpty()
     }
 
     // --- Notification
@@ -268,7 +348,8 @@ class TriggerService : Service() {
         /** Starts or refreshes the watcher. Safe to call repeatedly. */
         fun sync(context: Context) {
             val intent = Intent(context, TriggerService::class.java)
-            if (ProfileStore(context).loadTriggers().any { it.enabled }) {
+            val store = ProfileStore(context)
+            if (store.loadTriggers().any { it.enabled } || store.loadAppOverride() != null) {
                 context.startForegroundService(intent)
             } else {
                 context.stopService(intent)
