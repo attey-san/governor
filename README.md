@@ -97,6 +97,27 @@ before writing to allow late vendor initialization to run. Vendor services may s
 override settings afterward. The generated zip can be sent directly to a file manager
 or root manager through Android's share sheet.
 
+## Installing
+
+Download the signed APK and its checksum from the
+[latest release](https://github.com/attey-san/governor/releases/latest), then verify the
+download:
+
+```sh
+sha256sum -c governor-*.apk.sha256
+```
+
+Official releases use the certificate in
+[`docs/release-certificate.pem`](docs/release-certificate.pem), with this SHA-256
+fingerprint:
+
+```text
+01:A2:C6:DB:80:EC:45:03:86:BB:45:FF:C0:73:AD:19:6E:9B:84:CC:9A:46:7D:B7:E9:75:2A:DD:1F:56:D9:66
+```
+
+An earlier debug build has a different signature. Android requires it to be uninstalled
+before installing the release build, which also removes its saved profiles and settings.
+
 ## Requirements
 
 - Android 8.0 (API 26) or newer
@@ -134,9 +155,9 @@ For local testing, install the debug APK with `./gradlew installDebug`.
 
 Device checks have been run on a rooted Poco F3 (alioth). Unit tests cover write-path
 validation, shell quoting and timeouts, frequency ordering, and rollback cancellation.
-CI builds debug and release APKs and runs Android lint. Android 8/9 runtime tests,
-module installation across root managers, and a controlled battery comparison remain
-unverified.
+CI builds debug and release APKs and runs Android lint; tagged releases are signed and
+published separately. Android 8/9 runtime tests, module installation across root
+managers, and a controlled battery comparison remain unverified.
 
 ## Notes from real hardware
 
