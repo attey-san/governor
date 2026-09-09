@@ -15,7 +15,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -32,6 +31,7 @@ import com.attey.governor.core.Profile
 import com.attey.governor.core.Trigger
 import com.attey.governor.core.TriggerType
 import com.attey.governor.ui.components.ChoiceRow
+import com.attey.governor.ui.components.CompactToggle
 import com.attey.governor.ui.components.MonoText
 import com.attey.governor.ui.components.SectionCard
 
@@ -56,8 +56,8 @@ fun ProfilesScreen(
 
     LazyColumn(
         modifier = Modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item { SaveCard(profiles, onSave) }
 
@@ -82,8 +82,14 @@ fun ProfilesScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Button(onClick = { onApply(p.name) }) { Text("Apply") }
-                        OutlinedButton(onClick = { onExportModule(p.name) }) { Text("Module") }
+                        Button(
+                            onClick = { onApply(p.name) },
+                            shape = MaterialTheme.shapes.extraSmall,
+                        ) { Text("Apply") }
+                        OutlinedButton(
+                            onClick = { onExportModule(p.name) },
+                            shape = MaterialTheme.shapes.extraSmall,
+                        ) { Text("Module") }
                         Spacer(modifier = Modifier.weight(1f))
                         if (p.name != "as found") {
                             TextButton(onClick = { pendingDelete = p.name }) { Text("Delete") }
@@ -104,7 +110,10 @@ fun ProfilesScreen(
             item {
                 SectionCard(title = "module written") {
                     MonoText(exportPath)
-                    OutlinedButton(onClick = { onShareModule(exportPath) }) { Text("Share or save") }
+                    OutlinedButton(
+                        onClick = { onShareModule(exportPath) },
+                        shape = MaterialTheme.shapes.extraSmall,
+                    ) { Text("Share or save") }
                     Text(
                         "Flash it in Magisk. It re-applies the profile 45 seconds after boot — " +
                             "vendor init overwrites cpufreq settings written any earlier.",
@@ -146,7 +155,11 @@ private fun SaveCard(profiles: List<Profile>, onSave: (String) -> Unit) {
                 label = { Text(if (duplicate) "that name is taken" else "name") },
             )
             Spacer(modifier = Modifier.width(8.dp))
-            Button(enabled = valid, onClick = { onSave(name.trim()); name = "" }) { Text("Save") }
+            Button(
+                enabled = valid,
+                onClick = { onSave(name.trim()); name = "" },
+                shape = MaterialTheme.shapes.extraSmall,
+            ) { Text("Save") }
         }
     }
 }
@@ -182,7 +195,10 @@ private fun TriggersCard(
                     color = if (t.enabled) MaterialTheme.colorScheme.onSurface
                     else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                 )
-                Switch(checked = t.enabled, onCheckedChange = { onSetEnabled(t.id, it) })
+                CompactToggle(
+                    checked = t.enabled,
+                    onCheckedChange = { onSetEnabled(t.id, it) },
+                )
                 TextButton(onClick = { onDelete(t.id) }) { Text("×") }
             }
         }
@@ -203,7 +219,10 @@ private fun TriggersCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                OutlinedButton(onClick = onGrantUsageAccess) { Text("Open usage access settings") }
+                OutlinedButton(
+                    onClick = onGrantUsageAccess,
+                    shape = MaterialTheme.shapes.extraSmall,
+                ) { Text("Open usage access settings") }
             } else {
                 ChoiceRow(
                     label = "app",
@@ -274,6 +293,7 @@ private fun TriggersCard(
                         if (type.needsApp) app?.label.orEmpty() else "",
                     )
                 },
+                shape = MaterialTheme.shapes.extraSmall,
             ) { Text("Add trigger") }
         }
     }

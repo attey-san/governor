@@ -3,7 +3,9 @@ package com.attey.governor.ui.theme
 import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -16,15 +18,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 
 // Fixed palette: status colors must not depend on the wallpaper.
-private val Mint = Color(0xFF5FD3B4)
-private val MintDim = Color(0xFF1E3B36)
-private val Amber = Color(0xFFFFC46B)
-private val AmberDim = Color(0xFF3A2F1B)
-private val Coral = Color(0xFFFF6B6B)
+private val Mint = Color(0xFF92D7BE)
+private val MintDim = Color(0xFF19382E)
+private val Amber = Color(0xFFE9B86B)
+private val AmberDim = Color(0xFF3B2D19)
+private val Coral = Color(0xFFEF7774)
 
 private val Dark = darkColorScheme(
     primary = Mint,
@@ -39,22 +42,22 @@ private val Dark = darkColorScheme(
     onTertiaryContainer = Amber,
     error = Coral,
     onError = Color(0xFF3A0A0A),
-    background = Color(0xFF0A0C0E),
-    onBackground = Color(0xFFE4E8EB),
-    surface = Color(0xFF0A0C0E),
-    onSurface = Color(0xFFE4E8EB),
-    surfaceVariant = Color(0xFF171B1F),
-    onSurfaceVariant = Color(0xFF9BA5AE),
-    outline = Color(0xFF3A424A),
-    outlineVariant = Color(0xFF262C32),
+    background = Color(0xFF0E1011),
+    onBackground = Color(0xFFE8E7E2),
+    surface = Color(0xFF111315),
+    onSurface = Color(0xFFE8E7E2),
+    surfaceVariant = Color(0xFF1B1E20),
+    onSurfaceVariant = Color(0xFF9FA4A2),
+    outline = Color(0xFF444A48),
+    outlineVariant = Color(0xFF292E2C),
     // Override Material's violet container defaults.
     secondaryContainer = Color(0xFF1B2735),
     onSecondaryContainer = Color(0xFF8FB6FF),
-    surfaceContainerLowest = Color(0xFF06080A),
-    surfaceContainerLow = Color(0xFF101418),
-    surfaceContainer = Color(0xFF141A1E),
-    surfaceContainerHigh = Color(0xFF1A2126),
-    surfaceContainerHighest = Color(0xFF222A30),
+    surfaceContainerLowest = Color(0xFF0A0C0D),
+    surfaceContainerLow = Color(0xFF141718),
+    surfaceContainer = Color(0xFF181B1D),
+    surfaceContainerHigh = Color(0xFF202426),
+    surfaceContainerHighest = Color(0xFF292D30),
     inverseSurface = Color(0xFFE4E8EB),
     inverseOnSurface = Color(0xFF11181D),
     surfaceTint = Mint,
@@ -71,38 +74,57 @@ private val Light = lightColorScheme(
     tertiaryContainer = Color(0xFFFFE3B0),
     onTertiaryContainer = Color(0xFF2A1D00),
     error = Color(0xFFB3261E),
-    background = Color(0xFFF7F9FA),
-    onBackground = Color(0xFF11181D),
-    surface = Color(0xFFF7F9FA),
-    onSurface = Color(0xFF11181D),
-    surfaceVariant = Color(0xFFE6EBEE),
-    onSurfaceVariant = Color(0xFF4B555D),
-    outline = Color(0xFFA8B2B9),
+    background = Color(0xFFF3F1EC),
+    onBackground = Color(0xFF1A1C1B),
+    surface = Color(0xFFF7F5F0),
+    onSurface = Color(0xFF1A1C1B),
+    surfaceVariant = Color(0xFFE7E5DF),
+    onSurfaceVariant = Color(0xFF555B58),
+    outline = Color(0xFFA8ADA9),
     // Override Material's violet container defaults.
     secondaryContainer = Color(0xFFD8E4F7),
     onSecondaryContainer = Color(0xFF15305C),
     surfaceContainerLowest = Color(0xFFFFFFFF),
-    surfaceContainerLow = Color(0xFFF1F4F6),
-    surfaceContainer = Color(0xFFEBEFF2),
-    surfaceContainerHigh = Color(0xFFE4E9EC),
-    surfaceContainerHighest = Color(0xFFDDE3E7),
+    surfaceContainerLow = Color(0xFFF0EEE9),
+    surfaceContainer = Color(0xFFEAE8E3),
+    surfaceContainerHigh = Color(0xFFE2E0DA),
+    surfaceContainerHighest = Color(0xFFD9D7D1),
     surfaceTint = Color(0xFF00695C),
 )
 
-// Tabular figures keep live readouts stable without using monospace body text.
+// Monospace readouts and tabular body figures do not shift as live values change.
 private val GovernorTypography = Typography().let { base ->
     base.copy(
+        titleLarge = base.titleLarge.copy(
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 22.sp,
+            letterSpacing = (-0.2).sp,
+        ),
+        titleMedium = base.titleMedium.copy(fontWeight = FontWeight.SemiBold),
         headlineMedium = base.headlineMedium.copy(
-            fontWeight = FontWeight.Light, fontSize = 36.sp, fontFeatureSettings = "tnum",
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Normal,
+            fontSize = 38.sp,
+            fontFeatureSettings = "tnum",
         ),
         headlineSmall = base.headlineSmall.copy(
-            fontWeight = FontWeight.Light, fontFeatureSettings = "tnum",
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Medium,
+            fontFeatureSettings = "tnum",
         ),
         bodyMedium = base.bodyMedium.copy(fontFeatureSettings = "tnum"),
-        titleSmall = base.titleSmall.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 0.4.sp),
-        labelSmall = base.labelSmall.copy(fontFamily = FontFamily.Monospace),
+        titleSmall = base.titleSmall.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 0.2.sp),
+        labelSmall = base.labelSmall.copy(fontWeight = FontWeight.Medium, letterSpacing = 0.2.sp),
     )
 }
+
+private val GovernorShapes = Shapes(
+    extraSmall = RoundedCornerShape(4.dp),
+    small = RoundedCornerShape(8.dp),
+    medium = RoundedCornerShape(12.dp),
+    large = RoundedCornerShape(18.dp),
+    extraLarge = RoundedCornerShape(24.dp),
+)
 
 @Composable
 fun GovernorTheme(content: @Composable () -> Unit) {
@@ -117,7 +139,11 @@ fun GovernorTheme(content: @Composable () -> Unit) {
             }
         }
     }
-    MaterialTheme(colorScheme = scheme, typography = GovernorTypography) {
+    MaterialTheme(
+        colorScheme = scheme,
+        typography = GovernorTypography,
+        shapes = GovernorShapes,
+    ) {
         // Paint the window immediately while the initial root probe runs.
         Surface(
             modifier = Modifier.fillMaxSize(),

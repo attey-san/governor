@@ -1,24 +1,31 @@
 package com.attey.governor.ui.components
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
@@ -32,6 +39,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -45,32 +54,30 @@ fun SectionCard(
     subtitle: String? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        ),
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 8.dp),
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        if (subtitle != null) {
             Text(
-                text = title,
-                style = MaterialTheme.typography.titleSmall,
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (subtitle != null) {
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Column(
-                modifier = Modifier.padding(top = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                content = content,
-            )
         }
+        Column(
+            modifier = Modifier.padding(top = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            content = content,
+        )
+        HorizontalDivider(
+            modifier = Modifier.padding(top = 18.dp),
+            color = MaterialTheme.colorScheme.outlineVariant,
+        )
     }
 }
 
@@ -79,19 +86,19 @@ fun ValueRow(label: String, value: String, enabled: Boolean = true) {
     val color = if (enabled) MaterialTheme.colorScheme.onSurface
                 else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().heightIn(min = 30.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = label,
             modifier = Modifier.padding(end = 8.dp),
-            style = MaterialTheme.typography.bodyMedium,
-            color = color,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else color,
         )
-        Box(modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.weight(1f))
         Text(
             text = value,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
             color = color,
         )
     }
@@ -109,7 +116,7 @@ fun NotExposed(label: String) {
             style = MaterialTheme.typography.bodyMedium,
             color = color,
         )
-        Box(modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.weight(1f))
         Text(
             text = "not exposed by this kernel",
             style = MaterialTheme.typography.bodySmall,
@@ -119,6 +126,7 @@ fun NotExposed(label: String) {
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun FreqSlider(
     label: String,
     steps: List<Long>,
@@ -145,14 +153,14 @@ fun FreqSlider(
         ) {
             Text(
                 text = label,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 color = if (enabled) MaterialTheme.colorScheme.onSurface
                         else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
             )
-            Box(modifier = Modifier.weight(1f))
+            Spacer(modifier = Modifier.weight(1f))
             Text(
                 text = displayValue.kHzToGHz(),
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.titleSmall.copy(fontFamily = FontFamily.Monospace),
                 color = if (enabled) MaterialTheme.colorScheme.onSurface
                         else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
             )
@@ -161,7 +169,9 @@ fun FreqSlider(
             value = displayIndex.toFloat().coerceIn(0f, maxIndex),
             onValueChange = { dragIndex = it.roundToInt().coerceIn(0, sorted.size - 1) },
             valueRange = 0f..maxIndex,
-            steps = (sorted.size - 2).coerceAtLeast(0),
+            // Values still snap to the discovered table; hiding dozens of tick marks
+            // keeps dense vendor frequency tables readable.
+            steps = 0,
             enabled = enabled,
             onValueChangeFinished = {
                 if (dragIndex >= 0) {
@@ -169,7 +179,71 @@ fun FreqSlider(
                     dragIndex = -1
                 }
             },
+            thumb = {
+                Box(
+                    modifier = Modifier
+                        .width(8.dp)
+                        .height(24.dp)
+                        .background(
+                            if (enabled) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f),
+                            RoundedCornerShape(2.dp),
+                        ),
+                )
+            },
+            track = { state ->
+                val fraction = ((state.value - state.valueRange.start) /
+                    (state.valueRange.endInclusive - state.valueRange.start)).coerceIn(0f, 1f)
+                val inactive = if (enabled) MaterialTheme.colorScheme.surfaceContainerHighest
+                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .background(inactive, RoundedCornerShape(2.dp)),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(fraction)
+                            .height(3.dp)
+                            .background(
+                                if (enabled) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f),
+                                RoundedCornerShape(2.dp),
+                            ),
+                    )
+                }
+            },
         )
+    }
+}
+
+@Composable
+fun CompactToggle(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
+) {
+    val track = if (checked) MaterialTheme.colorScheme.primary
+    else MaterialTheme.colorScheme.surfaceContainerHighest
+    val thumb = if (checked) MaterialTheme.colorScheme.onPrimary
+    else MaterialTheme.colorScheme.onSurfaceVariant
+    Box(
+        modifier = Modifier
+            .width(40.dp)
+            .height(22.dp)
+            .alpha(if (enabled) 1f else 0.38f)
+            .background(track, CircleShape)
+            .toggleable(
+                value = checked,
+                enabled = enabled,
+                role = Role.Switch,
+                onValueChange = onCheckedChange,
+            )
+            .padding(3.dp),
+        contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
+    ) {
+        Box(modifier = Modifier.size(16.dp).background(thumb, CircleShape))
     }
 }
 
@@ -193,7 +267,7 @@ fun ChoiceRow(
             style = MaterialTheme.typography.bodyMedium,
             color = labelColor,
         )
-        Box(modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.weight(1f))
         Box {
             TextButton(
                 onClick = { expanded = true },
@@ -247,7 +321,7 @@ fun Readout(
     color: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurface,
     caption: String? = null,
 ) {
-    Row(verticalAlignment = Alignment.Bottom) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
         Text(text = value, style = MaterialTheme.typography.headlineMedium, color = color)
         Text(
             text = " $unit",
@@ -256,7 +330,7 @@ fun Readout(
             modifier = Modifier.padding(bottom = 6.dp),
         )
         if (caption != null) {
-            Box(modifier = Modifier.weight(1f))
+            Spacer(modifier = Modifier.weight(1f))
             Text(
                 text = caption,
                 style = MaterialTheme.typography.bodySmall,

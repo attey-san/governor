@@ -9,7 +9,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -26,8 +28,8 @@ fun CapabilityScreen(capabilities: List<Capability>) {
     val grouped = capabilities.groupBy { it.area }
     LazyColumn(
         modifier = Modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
             SectionCard(title = "summary") {
@@ -96,11 +98,17 @@ private fun CapabilityRow(cap: Capability) {
                 )
             }
         }
-        Text(
-            text = indicator,
-            style = MaterialTheme.typography.labelSmall,
-            color = indicatorColor,
-            modifier = Modifier.padding(start = 8.dp, top = 2.dp),
-        )
+        Surface(
+            modifier = Modifier.padding(start = 8.dp),
+            shape = RoundedCornerShape(6.dp),
+            color = indicatorColor.copy(alpha = 0.14f),
+            contentColor = indicatorColor,
+        ) {
+            Text(
+                text = indicator,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+        }
     }
 }

@@ -1,6 +1,9 @@
 package com.attey.governor.ui
 
 import android.content.Intent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,24 +12,31 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -37,6 +47,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -59,8 +70,25 @@ import com.attey.governor.ui.screens.ThermalScreen
 import java.io.File
 import java.util.Locale
 
-private val TABS = listOf(
-    "CPU", "GPU", "Battery", "Thermal", "I/O", "Memory", "Profiles", "Measure", "Capability",
+private enum class Area(val label: String, val icon: ImageVector) {
+    TUNE("Tune", Icons.Filled.Build),
+    MONITOR("Monitor", Icons.Filled.Favorite),
+    AUTOMATE("Automate", Icons.Filled.Settings),
+    EVIDENCE("Evidence", Icons.Filled.Search),
+}
+
+private data class Destination(val label: String, val area: Area)
+
+private val DESTINATIONS = listOf(
+    Destination("CPU", Area.TUNE),
+    Destination("GPU", Area.TUNE),
+    Destination("Battery", Area.MONITOR),
+    Destination("Thermal", Area.MONITOR),
+    Destination("I/O", Area.TUNE),
+    Destination("Memory", Area.TUNE),
+    Destination("Profiles", Area.AUTOMATE),
+    Destination("Measure", Area.EVIDENCE),
+    Destination("Capability", Area.EVIDENCE),
 )
 
 @Composable
@@ -84,9 +112,15 @@ private fun LoadingScreen() {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        CircularProgressIndicator()
+        Text("governor", style = MaterialTheme.typography.titleLarge)
+        Spacer(modifier = Modifier.padding(top = 18.dp))
+        CircularProgressIndicator(strokeWidth = 3.dp)
         Spacer(modifier = Modifier.padding(top = 12.dp))
-        Text("probing", style = MaterialTheme.typography.bodyLarge)
+        Text(
+            "reading kernel interfaces",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -97,13 +131,21 @@ private fun NoRootScreen(message: String, onRetry: () -> Unit) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(message, style = MaterialTheme.typography.bodyLarge)
+        Text("root unavailable", style = MaterialTheme.typography.titleLarge)
+        Spacer(modifier = Modifier.padding(top = 8.dp))
+        Text(
+            message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         Spacer(modifier = Modifier.padding(top = 16.dp))
-        Button(onClick = onRetry) { Text("Retry") }
+        Button(
+            onClick = onRetry,
+            shape = MaterialTheme.shapes.extraSmall,
+        ) { Text("Retry") }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ReadyScaffold(state: UiState.Ready, vm: GovernorViewModel) {
     var selected by rememberSaveable { mutableIntStateOf(0) }
@@ -118,6 +160,9 @@ private fun ReadyScaffold(state: UiState.Ready, vm: GovernorViewModel) {
     val apps by vm.installedApps.collectAsState()
     val hasUsageAccess by vm.hasUsageAccess.collectAsState()
     val context = LocalContext.current
+    val destination = DESTINATIONS[selected]
+    val area = destination.area
+    val areaDestinations = DESTINATIONS.withIndex().filter { it.value.area == area }
 
     // Usage access is granted outside the app, so recheck on tab changes.
     LaunchedEffect(selected) { vm.recheckUsageAccess() }
@@ -132,53 +177,39 @@ private fun ReadyScaffold(state: UiState.Ready, vm: GovernorViewModel) {
 
     Scaffold(
         topBar = {
-            Column {
-                TopAppBar(
-                    title = {
-                        Column {
-                            Text(
-                                text = state.device.kernel.ifEmpty { "kernel ?" },
-                                style = MaterialTheme.typography.titleSmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                text = buildString {
-                                    append(state.device.rootProvider)
-                                    append(" · ")
-                                    append(state.device.totalCores)
-                                    append(" cores")
-                                    state.live.hottestZone?.let {
-                                        append(" · ")
-                                        append(String.format(Locale.US, "%.1f°C", it.second))
-                                    }
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                    ),
-                )
-                PrimaryScrollableTabRow(
-                    selectedTabIndex = selected,
-                    edgePadding = 8.dp,
-                    containerColor = MaterialTheme.colorScheme.surface,
-                ) {
-                    TABS.forEachIndexed { i, label ->
-                        Tab(
-                            selected = selected == i,
-                            onClick = { selected = i },
-                            text = { Text(label, style = MaterialTheme.typography.labelLarge) },
-                        )
+            AppHeader(
+                title = if (areaDestinations.size == 1) destination.label else area.label,
+                status = buildString {
+                    append(state.device.rootProvider)
+                    append(" · ")
+                    append(state.device.totalCores)
+                    append(" cores")
+                    state.live.hottestZone?.let {
+                        append(" · ")
+                        append(String.format(Locale.US, "%.1f°C", it.second))
                     }
-                }
-            }
+                    if (state.device.kernel.isNotEmpty()) {
+                        append(" · ")
+                        append(state.device.kernel)
+                    }
+                },
+                destinations = areaDestinations,
+                selected = selected,
+                onSelect = { selected = it },
+            )
         },
         bottomBar = {
-            state.pending?.let { PendingBar(it, vm::confirmPending, vm::revertPending) }
+            Column {
+                state.pending?.let { PendingBar(it, vm::confirmPending, vm::revertPending) }
+                AreaNavigation(
+                    selected = area,
+                    onSelect = { item ->
+                        if (area != item) {
+                            selected = DESTINATIONS.indexOfFirst { it.area == item }
+                        }
+                    },
+                )
+            }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
@@ -258,6 +289,137 @@ private fun ReadyScaffold(state: UiState.Ready, vm: GovernorViewModel) {
 }
 
 @Composable
+private fun AppHeader(
+    title: String,
+    status: String,
+    destinations: List<IndexedValue<Destination>>,
+    selected: Int,
+    onSelect: (Int) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+            .statusBarsPadding(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "governor",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = status,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (destinations.size > 1) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 8.dp),
+            ) {
+                destinations.forEach { entry ->
+                    val active = selected == entry.index
+                    Box(
+                        modifier = Modifier
+                            .widthIn(min = 88.dp)
+                            .height(44.dp)
+                            .clickable { onSelect(entry.index) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = entry.value.label,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (active) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (active) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .width(28.dp)
+                                    .height(2.dp)
+                                    .background(MaterialTheme.colorScheme.primary),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    }
+}
+
+@Composable
+private fun AreaNavigation(selected: Area, onSelect: (Area) -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceContainer),
+    ) {
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .height(64.dp),
+        ) {
+            Area.entries.forEach { item ->
+                val active = selected == item
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onSelect(item) }
+                        .padding(top = 7.dp, bottom = 5.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(22.dp)
+                            .height(2.dp)
+                            .background(
+                                if (active) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.surfaceContainer,
+                            ),
+                    )
+                    Icon(
+                        imageVector = item.icon,
+                        contentDescription = null,
+                        tint = if (active) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = item.label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (active) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun PendingBar(pending: PendingRevert, onConfirm: () -> Unit, onRevert: () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -284,7 +446,7 @@ private fun PendingBar(pending: PendingRevert, onConfirm: () -> Unit, onRevert: 
                 Spacer(modifier = Modifier.width(8.dp))
                 Button(
                     onClick = onConfirm,
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(4.dp),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
                 ) { Text("Keep") }
             }

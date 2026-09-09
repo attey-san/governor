@@ -60,8 +60,8 @@ fun MeasureScreen(
 
     LazyColumn(
         modifier = Modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         if (live.charging) {
             item {
@@ -100,9 +100,15 @@ fun MeasureScreen(
                     onSelect = { minutes = it.substringBefore(' ').toIntOrNull() ?: 5 },
                 )
                 if (running) {
-                    OutlinedButton(onClick = onStop) { Text("Stop") }
+                    OutlinedButton(
+                        onClick = onStop,
+                        shape = MaterialTheme.shapes.extraSmall,
+                    ) { Text("Stop") }
                 } else {
-                    Button(onClick = { onStart(target.takeIf { it != BASELINE }, minutes) }) {
+                    Button(
+                        onClick = { onStart(target.takeIf { it != BASELINE }, minutes) },
+                        shape = MaterialTheme.shapes.extraSmall,
+                    ) {
                         Text("Start")
                     }
                 }

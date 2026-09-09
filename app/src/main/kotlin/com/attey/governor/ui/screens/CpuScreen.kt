@@ -18,7 +18,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -36,6 +35,7 @@ import com.attey.governor.core.DeviceModel
 import com.attey.governor.core.LiveStats
 import com.attey.governor.core.SysNode
 import com.attey.governor.ui.components.ChoiceRow
+import com.attey.governor.ui.components.CompactToggle
 import com.attey.governor.ui.components.FreqSlider
 import com.attey.governor.ui.components.NotExposed
 import com.attey.governor.ui.components.Readout
@@ -55,8 +55,8 @@ fun CpuScreen(
     val labels = device.clusterLabels
     LazyColumn(
         modifier = Modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         items(device.policies.withIndex().toList()) { (index, policy) ->
             CpuPolicyCard(
@@ -271,7 +271,7 @@ private fun CoresSection(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                 )
-                Switch(
+                CompactToggle(
                     checked = online[cpu] ?: true,
                     onCheckedChange = { on -> onSetCoreOnline(cpu, on) },
                     enabled = canOffline,

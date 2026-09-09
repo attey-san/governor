@@ -32,8 +32,8 @@ fun MemoryScreen(
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item { ZramCard(device, onSetTunable) }
         item { BoostCard(device, onSetTunable) }
