@@ -44,4 +44,18 @@ class WriterTest {
             ) == null
         )
     }
+
+    @Test
+    fun dotSegmentsCannotEscapeAnAllowedDirectory() {
+        val paths = listOf(
+            "/sys/devices/system/cpu/cpufreq/policy0/../uevent",
+            "/sys/devices/system/cpu/cpufreq/policy0/./scaling_max_freq",
+            "/sys/class/devfreq/../uevent",
+            "/proc/sys/vm/..",
+        )
+        for (path in paths) {
+            assertFalse(path, Writer.isAllowedPath(path))
+            assertTrue(path, Writer.shellWriteLine(path, "1") == null)
+        }
+    }
 }

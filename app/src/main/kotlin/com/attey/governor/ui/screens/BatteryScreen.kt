@@ -1,23 +1,21 @@
 package com.attey.governor.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.attey.governor.core.BatteryNodes
 import com.attey.governor.core.LiveStats
-import com.attey.governor.ui.components.NotExposed
-import androidx.compose.foundation.layout.Row
-import androidx.compose.ui.Alignment
-import androidx.compose.foundation.layout.padding
 import com.attey.governor.ui.components.MonoText
+import com.attey.governor.ui.components.NotExposed
 import com.attey.governor.ui.components.Readout
 import com.attey.governor.ui.components.SectionCard
 import com.attey.governor.ui.components.ValueRow
@@ -70,7 +68,7 @@ private fun NowCard(live: LiveStats) {
 
 @Composable
 private fun HealthCard(battery: BatteryNodes?) {
-    SectionCard(title = "health", subtitle = "capacity left against what it shipped with") {
+    SectionCard(title = "health", subtitle = "reported full-charge capacity versus design") {
         if (battery == null) {
             NotExposed("battery nodes")
             return@SectionCard
@@ -103,8 +101,7 @@ private fun HealthCard(battery: BatteryNodes?) {
         if (cycles == null) {
             NotExposed("cycle_count")
             Text(
-                "Some gauges report a cycle count of 0 or 1 forever. Rather than print " +
-                    "that as a fact, it is treated as unreported.",
+                "Cycle count is unavailable or appears unimplemented by this fuel gauge.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

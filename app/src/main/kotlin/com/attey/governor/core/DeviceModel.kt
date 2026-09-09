@@ -2,7 +2,6 @@ package com.attey.governor.core
 
 import java.util.Locale
 
-/** Runtime-discovered kernel interfaces. */
 data class DeviceModel(
     val policies: List<CpuPolicy> = emptyList(),
     val gpus: List<GpuDevice> = emptyList(),

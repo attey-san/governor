@@ -3,17 +3,19 @@ package com.attey.governor.core
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
+import java.util.concurrent.TimeUnit
 
 /**
  * Persistent root shell used to batch sysfs reads. Avoid shell arithmetic here:
  * mksh wraps it at 32 bits, below several counters we read.
  */
-class RootShell private constructor(
+class RootShell internal constructor(
     private val process: Process,
-    private val stdin: OutputStreamWriter,
-    private val stdout: BufferedReader,
 ) {
+    private val stdin = OutputStreamWriter(process.outputStream)
+    private val stdout = BufferedReader(InputStreamReader(process.inputStream))
     private val lock = Any()
+    private var skipLf = false
 
     // After a timeout, unread output can no longer be matched to a command.
     @Volatile private var broken = false
@@ -32,7 +34,7 @@ class RootShell private constructor(
             broken = true
             return ""
         }
-        val deadline = System.currentTimeMillis() + timeoutMs
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
         val sb = StringBuilder()
         while (true) {
             val line = readLineBefore(deadline)
@@ -49,13 +51,28 @@ class RootShell private constructor(
         sb.toString()
     }
 
-    /** BufferedReader has no read timeout, so poll ready() until the deadline. */
+    // ready() covers one character; readLine() can still block on a partial line.
     private fun readLineBefore(deadline: Long): String? {
-        while (System.currentTimeMillis() < deadline) {
+        val line = StringBuilder()
+        while (System.nanoTime() < deadline) {
             try {
-                if (stdout.ready()) return stdout.readLine()
-                if (!process.isAlive) return null
-                Thread.sleep(4)
+                if (!stdout.ready()) {
+                    if (!process.isAlive) return null
+                    Thread.sleep(4)
+                    continue
+                }
+                val next = stdout.read()
+                if (next < 0) return null
+                val ch = next.toChar()
+                if (skipLf) {
+                    skipLf = false
+                    if (ch == '\n') continue
+                }
+                when (ch) {
+                    '\r' -> { skipLf = true; return line.toString() }
+                    '\n' -> return line.toString()
+                    else -> line.append(ch)
+                }
             } catch (_: Exception) {
                 return null
             }
@@ -132,9 +149,7 @@ class RootShell private constructor(
                 instance?.let { if (it.isUsable) return it }
                 return try {
                     val p = ProcessBuilder("su").redirectErrorStream(true).start()
-                    val w = OutputStreamWriter(p.outputStream)
-                    val r = BufferedReader(InputStreamReader(p.inputStream))
-                    val shell = RootShell(p, w, r)
+                    val shell = RootShell(p)
                     // This call may wait while the user answers the root prompt.
                     if (shell.exec("id -u", GRANT_TIMEOUT_MS).trim() != "0") { shell.close(); null }
                     else { instance = shell; shell }

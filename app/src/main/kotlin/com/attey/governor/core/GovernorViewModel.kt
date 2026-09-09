@@ -271,8 +271,8 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
             if (sh == null) {
                 _state.value = UiState.NoRoot(
                     "Root was refused or is not present. Governor reads and writes kernel " +
-                        "nodes that are unreachable without it -- there is no degraded mode " +
-                        "worth showing you."
+                        "nodes that require root access. Grant access in your root manager, " +
+                        "then retry."
                 )
                 return@launch
             }
@@ -281,8 +281,7 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
             val m = withContext(Dispatchers.IO) { runCatching { DeviceProbe.probe(sh) } }
                 .getOrElse {
                     _state.value = UiState.NoRoot(
-                        "Probing this kernel failed: ${it.message ?: it::class.simpleName}. " +
-                            "That is a bug in Governor, not in your phone."
+                        "Probing this kernel failed: ${it.message ?: it::class.simpleName}."
                     )
                     return@launch
                 }
@@ -298,7 +297,6 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Stops live root polling while the UI is not visible. */
     fun onUiStarted() {
         if (model != null) startLive()
     }
@@ -402,6 +400,10 @@ class GovernorViewModel(app: Application) : AndroidViewModel(app) {
                 // Preserve the oldest value when changes overlap.
                 val pending = (_state.value as? UiState.Ready)?.pending
                 val before = sh.readAll(ops.map { it.first }.distinct())
+                if (ops.any { before[it.first].isNullOrBlank() }) {
+                    reject("Could not read every setting for rollback; nothing was changed")
+                    return@launch
+                }
                 val merged = LinkedHashMap<String, String>()
                 pending?.restore?.forEach { (path, value) -> merged[path] = value }
                 for ((path) in ops) before[path]?.trim()?.let { merged.putIfAbsent(path, it) }

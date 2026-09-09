@@ -1,6 +1,6 @@
 package com.attey.governor.core
 
-/** Reports one representative node for each known tunable kind. */
+/** Reports one representative path for each known kernel interface. */
 object Capabilities {
 
     private class Kind(
@@ -21,7 +21,7 @@ object Capabilities {
         Kind("CPU", "current frequency", "{policy}/cpuinfo_cur_freq"),
         Kind("CPU", "time in state", "{policy}/stats/time_in_state"),
         Kind("CPU", "transition count", "{policy}/stats/total_trans"),
-        Kind("CPU", "core hotplug", "/sys/devices/system/cpu/cpu1/online"),
+        Kind("CPU", "core hotplug", "{cpu}/online"),
         Kind("CPU", "core_ctl min cpus", "{policy}/core_ctl/min_cpus"),
         Kind("CPU", "core_ctl max cpus", "{policy}/core_ctl/max_cpus"),
         Kind("CPU", "core_ctl busy up", "{policy}/core_ctl/busy_up_thres"),
@@ -45,7 +45,7 @@ object Capabilities {
         // Input boost
         Kind(
             "Boost", "input boost freq", "{boost}/input_boost_freq",
-            "per-cpu pairs, not a scalar: \"0:1344000 1:0 ...\". Writing a bare number silently boosts cpu0 only.",
+            "Uses per-CPU pairs such as \"0:1344000 1:0 ...\"; a scalar updates CPU 0 only.",
         ),
         Kind("Boost", "input boost duration", "{boost}/input_boost_ms"),
         Kind("Boost", "sched boost on input", "{boost}/sched_boost_on_input"),
@@ -82,7 +82,7 @@ object Capabilities {
         Kind("I/O", "scheduler", "{blk}/queue/scheduler"),
         Kind(
             "I/O", "read ahead", "{blk}/queue/read_ahead_kb",
-            "measured null on the development device: no setting moved sequential or random throughput.",
+            "No measurable throughput change in development-device testing.",
         ),
         Kind("I/O", "queue depth", "{blk}/queue/nr_requests"),
         Kind("I/O", "request affinity", "{blk}/queue/rq_affinity"),
@@ -94,11 +94,11 @@ object Capabilities {
         // Memory
         Kind(
             "Memory", "swappiness", "/proc/sys/vm/swappiness",
-            "measured null on the development device: no effect on launch times or page faults.",
+            "No measurable launch-time or page-fault change in development-device testing.",
         ),
         Kind(
             "Memory", "page cluster", "/proc/sys/vm/page-cluster",
-            "measured null on the development device.",
+            "No measurable change in development-device testing.",
         ),
         Kind("Memory", "cache pressure", "/proc/sys/vm/vfs_cache_pressure"),
         Kind("Memory", "dirty ratio", "/proc/sys/vm/dirty_ratio"),
@@ -116,51 +116,44 @@ object Capabilities {
         Kind("Thermal", "zone temperature", "/sys/class/thermal/thermal_zone0/temp"),
         Kind(
             "Thermal", "cooling state", "/sys/class/thermal/cooling_device0/cur_state",
-            "read-only in this app. A userspace thermal governor re-parks any change within seconds, and losing that argument means a hot phone.",
+            "Governor keeps thermal controls read-only; vendor services normally manage them.",
         ),
         Kind("Thermal", "vendor thermal profile", "/sys/class/thermal/thermal_message/sconfig"),
     )
 
-    val total: Int get() = KINDS.size
-
     fun report(shell: RootShell, model: DeviceModel): List<Capability> {
-        val policy = model.policies.firstOrNull()
-        val gpu = model.gpus.firstOrNull()
-        val blk = model.blockDevices.firstOrNull { !it.isVirtual }
-        // probeBoost merges two candidate directories, so anchor from a node path.
-        val boostDir = (model.boost["input_boost_freq"] ?: model.boost.values.firstOrNull())
-            ?.path?.substringBeforeLast('/')
+        val candidates = KINDS.associateWith { pathsFor(it.template, model) }
+        val nodes = SysNode.probe(shell, candidates.values.flatten().distinct())
 
-        val anchors = mapOf(
-            "{policy}" to policy?.path,
-            "{gov}" to policy?.takeIf { it.governor.isNotEmpty() }?.let { "${it.path}/${it.governor}" },
-            "{gpu}" to gpu?.path,
-            "{bat}" to model.battery?.path,
-            "{blk}" to blk?.path,
-            "{boost}" to boostDir,
-        )
-        // Leave templates unresolved when the device has no matching subsystem.
-        val resolved = KINDS.map { k ->
-            val missing = anchors.any { (token, value) ->
-                value == null && k.template.contains(token)
-            }
-            val path = if (missing) null else anchors.entries.fold(k.template) { acc, (token, value) ->
-                if (value == null) acc else acc.replace(token, value)
-            }
-            k to path
-        }
-        val nodes = SysNode.probe(shell, resolved.mapNotNull { it.second }.distinct())
-
-        return resolved.map { (k, p) ->
-            val node = p?.let { nodes[it] }
+        return candidates.map { (kind, paths) ->
+            val path = paths.firstOrNull { nodes[it]?.exists == true } ?: paths.firstOrNull()
+            val node = path?.let(nodes::get)
             Capability(
-                area = k.area,
-                name = k.name,
-                path = p ?: k.template,
+                area = kind.area,
+                name = kind.name,
+                path = path ?: kind.template,
                 present = node?.exists == true,
                 writable = node?.writable == true,
-                note = k.note,
+                note = kind.note,
             )
         }
+    }
+
+    internal fun pathsFor(template: String, model: DeviceModel): List<String> {
+        val anchors = linkedMapOf(
+            "{policy}" to model.policies.map { it.path },
+            "{gov}" to model.policies.mapNotNull { policy ->
+                policy.governor.takeIf(String::isNotEmpty)?.let { "${policy.path}/$it" }
+            },
+            "{cpu}" to model.policies.flatMap { it.cpus }.filter { it != 0 }
+                .distinct().sorted().map { "/sys/devices/system/cpu/cpu$it" },
+            "{gpu}" to model.gpus.map { it.path },
+            "{bat}" to listOfNotNull(model.battery?.path),
+            "{blk}" to model.blockDevices.filterNot { it.isVirtual }.map { it.path },
+            "{boost}" to model.boost.values.map { it.path.substringBeforeLast('/') }.distinct(),
+        )
+        val entry = anchors.entries.firstOrNull { template.contains(it.key) }
+            ?: return listOf(template)
+        return entry.value.map { template.replace(entry.key, it) }
     }
 }

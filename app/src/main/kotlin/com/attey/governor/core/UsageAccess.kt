@@ -12,11 +12,10 @@ import java.util.Locale
 
 data class InstalledApp(val packageName: String, val label: String)
 
-/** Foreground-app detection for app profile triggers. */
 object UsageAccess {
 
     /**
-     * PACKAGE_USAGE_STATS is an appop granted in Settings. Android 8 and 9 need
+     * PACKAGE_USAGE_STATS is an app op granted in Settings. Android 8 and 9 need
      * the deprecated checkOpNoThrow call; unsafeCheckOpNoThrow starts at API 29.
      */
     @Suppress("DEPRECATION")

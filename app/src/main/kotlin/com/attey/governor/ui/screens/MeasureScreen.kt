@@ -65,11 +65,10 @@ fun MeasureScreen(
     ) {
         if (live.charging) {
             item {
-                SectionCard(title = "plugged in", subtitle = "measure anyway if you like") {
+                SectionCard(title = "plugged in", subtitle = "charging current is not device load") {
                     Text(
-                        "While charging, current_now is the current going into the battery, " +
-                            "not what the phone is spending. A run taken now measures the " +
-                            "charger. Unplug first if you want the comparison to mean anything.",
+                        "While charging, current_now reports current into the battery. " +
+                            "Disconnect external power before comparing profiles.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.tertiary,
                     )
@@ -77,11 +76,10 @@ fun MeasureScreen(
             }
         }
         item {
-            SectionCard(title = "measure", subtitle = "what a profile actually costs") {
+            SectionCard(title = "measure", subtitle = "battery draw by profile") {
                 Text(
-                    "Samples real battery draw — current × voltage — for a fixed window. " +
-                        "Measure a baseline first, then measure a profile against it. " +
-                        "Keep the phone doing the same thing in both runs or the number means nothing.",
+                    "Samples current × voltage for a fixed window. Measure a baseline, then " +
+                        "a profile under the same workload.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -198,7 +196,7 @@ private fun ResultCard(result: MeasureResult) {
         ValueRow(result.candidate.label, "${result.candidate.averageMilliwatts ?: 0} mW")
         if (!significant) {
             Text(
-                "Under 5% of the baseline, within expected measurement noise.",
+                "Difference is below the configured 5% noise threshold.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -208,7 +206,7 @@ private fun ResultCard(result: MeasureResult) {
 
 @Composable
 private fun ResidencyCard(run: MeasureRun, device: DeviceModel) {
-    SectionCard(title = "residency", subtitle = "where the clusters actually sat") {
+    SectionCard(title = "residency", subtitle = "time spent at each frequency") {
         run.residency.toSortedMap().forEach { (policyId, shares) ->
             val index = device.policies.indexOfFirst { it.id == policyId }
             Text(

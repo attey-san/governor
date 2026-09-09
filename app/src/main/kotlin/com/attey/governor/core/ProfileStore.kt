@@ -9,9 +9,9 @@ internal data class AppOverrideState(
     val packageName: String,
     val restore: Profile,
     val applied: Boolean,
+    val previousActiveProfile: String?,
 )
 
-/** JSON-backed profile and trigger storage. */
 class ProfileStore(context: Context) {
 
     private val profileFile = File(context.filesDir, "profiles.json")
@@ -45,7 +45,12 @@ class ProfileStore(context: Context) {
             }
             val profile = root.optJSONObject("restore")?.let(::toProfile)
                 ?: return@runCatching null
-            AppOverrideState(packageName, profile, root.optBoolean("applied", true))
+            AppOverrideState(
+                packageName = packageName,
+                restore = profile,
+                applied = root.optBoolean("applied", true),
+                previousActiveProfile = root.stringOrNull("previousActiveProfile"),
+            )
         }.getOrNull()
     }
 
@@ -53,11 +58,13 @@ class ProfileStore(context: Context) {
         packageName: String,
         restore: Profile,
         applied: Boolean,
+        previousActiveProfile: String?,
     ): Boolean {
         val root = JSONObject().apply {
             put("packageName", packageName)
             put("restore", restore.toJson())
             put("applied", applied)
+            previousActiveProfile?.let { put("previousActiveProfile", it) }
         }
         return writeTextAtomically(appOverrideFile, root.toString(2))
     }

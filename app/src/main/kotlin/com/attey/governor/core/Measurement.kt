@@ -4,7 +4,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlin.coroutines.coroutineContext
 
-/** Battery-draw and cpufreq-residency measurement windows. */
 object Measurement {
 
     private const val SAMPLE_MS = 2_000L

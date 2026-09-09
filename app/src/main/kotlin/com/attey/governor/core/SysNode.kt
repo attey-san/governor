@@ -1,6 +1,5 @@
 package com.attey.governor.core
 
-/** A probed sysfs node. */
 data class SysNode(
     val path: String,
     val exists: Boolean = false,
@@ -83,7 +82,8 @@ object Writer {
     )
 
     internal fun isAllowedPath(path: String): Boolean =
-        !isDenied(path) && ALLOW.any { it.matches(path) }
+        path.split('/').none { it == "." || it == ".." } &&
+            !isDenied(path) && ALLOW.any { it.matches(path) }
 
     private fun invalidValue(value: String): Boolean =
         value.any(Char::isISOControl)

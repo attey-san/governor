@@ -50,7 +50,6 @@ private val Dark = darkColorScheme(
     onSurfaceVariant = Color(0xFF9FA4A2),
     outline = Color(0xFF444A48),
     outlineVariant = Color(0xFF292E2C),
-    // Override Material's violet container defaults.
     secondaryContainer = Color(0xFF1B2735),
     onSecondaryContainer = Color(0xFF8FB6FF),
     surfaceContainerLowest = Color(0xFF0A0C0D),
@@ -81,7 +80,6 @@ private val Light = lightColorScheme(
     surfaceVariant = Color(0xFFE7E5DF),
     onSurfaceVariant = Color(0xFF555B58),
     outline = Color(0xFFA8ADA9),
-    // Override Material's violet container defaults.
     secondaryContainer = Color(0xFFD8E4F7),
     onSecondaryContainer = Color(0xFF15305C),
     surfaceContainerLowest = Color(0xFFFFFFFF),

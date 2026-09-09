@@ -35,7 +35,7 @@ fun CapabilityScreen(capabilities: List<Capability>) {
             SectionCard(title = "summary") {
                 Text(
                     text = if (total == 0) "probing"
-                    else "this kernel exposes $present of $total known tunables",
+                    else "this kernel exposes $present of $total known interfaces",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )

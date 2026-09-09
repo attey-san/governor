@@ -66,8 +66,7 @@ fun ProfilesScreen(
                 SectionCard(title = "profiles") {
                     Text(
                         "A profile is the current frequency limits, governors and tunables " +
-                            "saved under a name. Save one, then attach it to a trigger below " +
-                            "so the phone applies it on its own.",
+                            "saved under a name. Triggers can apply saved profiles automatically.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -115,8 +114,8 @@ fun ProfilesScreen(
                         shape = MaterialTheme.shapes.extraSmall,
                     ) { Text("Share or save") }
                     Text(
-                        "Flash it in Magisk. It re-applies the profile 45 seconds after boot — " +
-                            "vendor init overwrites cpufreq settings written any earlier.",
+                        "The module applies this profile 45 seconds after boot, following late " +
+                            "vendor initialization.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -129,7 +128,7 @@ fun ProfilesScreen(
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
             title = { Text("Delete \"$name\"?") },
-            text = { Text("Any trigger pointing at it is removed too, otherwise it would sit there never firing.") },
+            text = { Text("Triggers assigned to this profile will also be deleted.") },
             confirmButton = {
                 TextButton(onClick = { onDelete(name); pendingDelete = null }) { Text("Delete") }
             },
@@ -185,7 +184,7 @@ private fun TriggersCard(
     // Do not repair selection by writing Compose state during composition.
     val target = chosen?.takeIf { it in names } ?: names.firstOrNull().orEmpty()
 
-    SectionCard(title = "triggers", subtitle = "the phone applies these on its own") {
+    SectionCard(title = "triggers", subtitle = "automatic profile changes") {
         triggers.forEach { t ->
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -213,9 +212,8 @@ private fun TriggersCard(
         if (type.needsApp) {
             if (!hasUsageAccess) {
                 Text(
-                    "Watching which app is open needs usage access. Android grants it in " +
-                        "Settings, not from a dialog. Nothing is polled until you add an " +
-                        "app trigger, and only while the screen is on.",
+                    "App triggers require usage access. Foreground-app polling runs only " +
+                        "while an app trigger is enabled and the screen is on.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

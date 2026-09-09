@@ -263,14 +263,16 @@ private fun CoresSection(
                     color = if (canOffline) MaterialTheme.colorScheme.onSurface
                             else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                 )
-                Text(
-                    modifier = Modifier
-                        .padding(start = 8.dp)
-                        .weight(1f),
-                    text = if (canOffline) "" else "cannot be offlined",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                )
+                if (canOffline) {
+                    Spacer(modifier = Modifier.weight(1f))
+                } else {
+                    Text(
+                        modifier = Modifier.padding(start = 8.dp).weight(1f),
+                        text = "cannot be offlined",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                    )
+                }
                 CompactToggle(
                     checked = online[cpu] ?: true,
                     onCheckedChange = { on -> onSetCoreOnline(cpu, on) },

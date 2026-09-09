@@ -13,7 +13,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-/** Quick-settings tile that applies the next saved profile. */
 class ProfileTileService : TileService() {
 
     override fun onStartListening() {

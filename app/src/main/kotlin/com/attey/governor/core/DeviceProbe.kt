@@ -338,7 +338,6 @@ object DeviceProbe {
             model.policies.forEach { add("${it.path}/scaling_cur_freq") }
             model.gpus.forEach { add("${it.path}/cur_freq") }
             add("/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage")
-            add("/proc/uptime")
             if (bat != null) {
                 addAll(listOf("current_now", "voltage_now", "capacity", "temp", "status").map { "$bat/$it" })
             }
@@ -350,7 +349,11 @@ object DeviceProbe {
 
         val uV = read["$bat/voltage_now"]?.trim()?.toLongOrNull()
         val rawCurrent = read["$bat/current_now"]?.trim()?.toLongOrNull()
-        val mW = milliwatts(rawCurrent, uV)
+        val charging = read["$bat/status"]?.trim()?.let { status ->
+            status.equals("Charging", true) || status.equals("Full", true) ||
+                status.equals("Not charging", true)
+        } == true
+        val mW = milliwatts(rawCurrent, uV, inferUnits = !charging)
 
         val temps: Map<Int, Float> = if (!includeThermal) emptyMap() else
             model.thermalZones.mapNotNull { z ->
@@ -377,23 +380,22 @@ object DeviceProbe {
             batteryMilliwatts = mW,
             batteryPercent = read["$bat/capacity"]?.trim()?.toIntOrNull(),
             batteryTempC = read["$bat/temp"]?.trim()?.toIntOrNull()?.let { it / 10f },
-            // current_now's sign convention varies; status supplies direction.
-            charging = read["$bat/status"]?.trim()?.let { status ->
-                status.equals("Charging", true) || status.equals("Full", true) ||
-                    status.equals("Not charging", true)
-            } == true,
+            charging = charging,
             hottestZone = hottest,
             zoneTemps = temps,
-            uptimeSeconds = read["/proc/uptime"]?.trim()?.substringBefore('.')?.toLongOrNull() ?: 0,
         )
     }
 
-    private fun milliwatts(rawCurrent: Long?, uV: Long?): Int? {
+    private fun milliwatts(rawCurrent: Long?, uV: Long?, inferUnits: Boolean): Int? {
         if (rawCurrent == null || uV == null || uV <= 0) return null
         if (rawCurrent == 0L) return 0
         // Compute as microamps first; sub-5 mW foreground readings imply mA units.
         val mWIfMicroamps = abs(rawCurrent).toDouble() * uV / 1_000_000_000.0
-        val milliamps = currentInMilliamps ?: (mWIfMicroamps < 5.0).also { currentInMilliamps = it }
+        val milliamps = currentInMilliamps ?: if (inferUnits) {
+            (mWIfMicroamps < 5.0).also { currentInMilliamps = it }
+        } else {
+            false
+        }
         return (if (milliamps) mWIfMicroamps * 1000 else mWIfMicroamps).roundToInt()
     }
 

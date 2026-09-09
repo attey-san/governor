@@ -63,9 +63,8 @@ fun ThermalScreen(zones: List<ThermalZone>, live: LiveStats) {
                     )
                 }
                 Text(
-                    "Read-only. A userspace thermal governor re-parks any change within " +
-                        "seconds; overriding it can leave the device without effective " +
-                        "thermal control.",
+                    "Thermal controls are read-only. Vendor services manage cooling state " +
+                        "and may overwrite manual changes.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -83,8 +82,7 @@ fun ThermalScreen(zones: List<ThermalZone>, live: LiveStats) {
                 val unpopulated = zones.size - readings.size
                 if (unpopulated > 0) {
                     Text(
-                        "$unpopulated zone(s) hidden: unreadable or below -30 °C. These are " +
-                            "not usable temperature reports.",
+                        "$unpopulated zone(s) hidden: unreadable or below -30 °C.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

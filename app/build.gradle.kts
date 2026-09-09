@@ -10,7 +10,6 @@ android {
 
     defaultConfig {
         applicationId = "com.attey.governor"
-        // Rooted devices skew old. 26 covers Android 8+ without giving up modern APIs.
         minSdk = 26
         targetSdk = 36
         versionCode = 1
@@ -19,9 +18,7 @@ android {
 
     buildTypes {
         release {
-            // Left unsigned on purpose: shipping a debug-signed release would let
-            // anyone with the public debug key push an update over it. Sign with
-            // your own key, or just use the debug build.
+            // Sign release artifacts separately with the maintainer's private key.
             isMinifyEnabled = false
         }
     }
@@ -47,8 +44,7 @@ kotlin {
 }
 
 dependencies {
-    // Last stable Compose line that builds with API 36 / AGP 8. Compose 1.12
-    // raises its own compile SDK to 37 and requires an AGP 9 toolchain.
+    // Compose 1.12 requires API 37 and AGP 9.
     val composeBom = platform("androidx.compose:compose-bom:2026.06.01")
     implementation(composeBom)
     implementation("androidx.compose.ui:ui")

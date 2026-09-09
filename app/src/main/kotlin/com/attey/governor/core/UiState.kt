@@ -25,7 +25,6 @@ data class LiveStats(
     val charging: Boolean = false,
     val hottestZone: Pair<String, Float>? = null,
     val zoneTemps: Map<Int, Float> = emptyMap(),
-    val uptimeSeconds: Long = 0,
 )
 
 /** A risky change with a root-side automatic rollback. */

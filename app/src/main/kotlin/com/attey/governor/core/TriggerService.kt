@@ -24,7 +24,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.ConcurrentHashMap
 
-/** Foreground service that watches profile trigger conditions. */
 class TriggerService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -42,6 +41,7 @@ class TriggerService : Service() {
     @Volatile private var screenOn = true
     @Volatile private var currentApp: String? = null
     @Volatile private var appOverrideApplied = false
+    @Volatile private var previousActiveProfile: String? = null
     private val appStateMutex = Mutex()
 
     // Snapshot restored when the foreground app changes.
@@ -58,6 +58,7 @@ class TriggerService : Service() {
             currentApp = saved.packageName
             beforeApp = saved.restore
             appOverrideApplied = saved.applied
+            previousActiveProfile = saved.previousActiveProfile
         }
         startForeground(NOTIFICATION_ID, notification("watching"))
         scope.launch {
@@ -116,6 +117,15 @@ class TriggerService : Service() {
         val device = DeviceProbe.probe(shell).also { model = it }
         val declined = ProfileEngine.apply(shell, device, restore)
         if (declined.isEmpty()) {
+            val prior = previousActiveProfile?.takeIf { name ->
+                store.loadProfiles().any { it.name == name }
+            }
+            val markerRestored = prior?.let(store::saveActiveProfile)
+                ?: store.clearActiveProfile()
+            if (!markerRestored) {
+                notify("settings restored, but the previous profile marker could not be restored")
+                return false
+            }
             if (!store.clearAppOverride()) {
                 notify("settings restored, but the app-trigger marker could not be cleared")
                 return false
@@ -123,6 +133,7 @@ class TriggerService : Service() {
             beforeApp = null
             currentApp = null
             appOverrideApplied = false
+            previousActiveProfile = null
             notify(successMessage)
             return true
         } else {
@@ -173,17 +184,19 @@ class TriggerService : Service() {
         val shell = RootShell.get() ?: return
         val device = DeviceProbe.probe(shell).also { model = it }
         val restore = beforeApp ?: ProfileEngine.snapshot(device, "before app")
+        val priorProfile = previousActiveProfile ?: store.loadActiveProfile()
         // Persist the restore point before changing the kernel.
-        if (!store.saveAppOverride(pkg, restore, applied = false)) {
+        if (!store.saveAppOverride(pkg, restore, applied = false, priorProfile)) {
             notify("could not save the pre-app restore point; profile not applied")
             return
         }
         beforeApp = restore
         appOverrideApplied = false
+        previousActiveProfile = priorProfile
         if (fire(entering)) {
             currentApp = pkg
             appOverrideApplied = true
-            store.saveAppOverride(pkg, restore, applied = true)
+            store.saveAppOverride(pkg, restore, applied = true, priorProfile)
         } else if (restoreAppOverrideLocked(
                 "profile ${entering.profileName} was incomplete; restored prior settings"
             )
@@ -263,9 +276,10 @@ class TriggerService : Service() {
         val device = model ?: DeviceProbe.probe(shell).also { model = it }
         val profile = profiles.firstOrNull { it.name == trigger.profileName } ?: return false
         val rejections = ProfileEngine.apply(shell, device, profile)
-        if (rejections.isEmpty()) store.saveActiveProfile(profile.name)
+        val markerSaved = rejections.isNotEmpty() || store.saveActiveProfile(profile.name)
         notify(
-            if (rejections.isEmpty()) "applied ${profile.name}"
+            if (rejections.isEmpty() && markerSaved) "applied ${profile.name}"
+            else if (rejections.isEmpty()) "applied ${profile.name}; profile marker not saved"
             else "applied ${profile.name}, ${rejections.size} setting(s) declined"
         )
         return rejections.isEmpty()

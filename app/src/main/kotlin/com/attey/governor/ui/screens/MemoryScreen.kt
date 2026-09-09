@@ -82,8 +82,7 @@ private fun BoostCard(device: DeviceModel, onSet: (String, String) -> Unit) {
             NotExposed("input_boost_freq")
         } else {
             // Per-CPU pairs, "0:1344000 1:0 2:0 ...". Writing a bare number here
-            // boosts cpu0 and silently leaves every other core alone -- the bug
-            // every other kernel manager ships.
+            // updates cpu0 only.
             val pairs = remember(node.value) {
                 node.value.split(Regex("\\s+")).filter { it.contains(':') }
                     .mapNotNull { p ->
